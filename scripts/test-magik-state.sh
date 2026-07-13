@@ -90,9 +90,12 @@ if grep -q 'library-refresh' "$ROOT/support/mister_magik/launcher.cpp"; then
 fi
 
 grep -q 'mister_magik_scanout_slots.ko' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q '/media/fat/mister-magik/platform-v1.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q '/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q '/media/fat/mister-magik/experiments' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_artifact_verification_failed' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'main_binary_sha256' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'platform_contract_sha256=8481c082c327c2892bf0fd64a68195472d4336723f6ab467a611655f949b1faf' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'main_sha256' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"

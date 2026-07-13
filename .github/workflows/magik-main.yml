@@ -1,0 +1,19 @@
+name: MiSTer MagiK Main Fork
+
+on:
+  pull_request:
+  push:
+    branches:
+      - mister-magik
+
+jobs:
+  host-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Launcher host tests
+        run: scripts/test-magik-state.sh
+      - name: Patch surface
+        run: scripts/check-magik-patch-surface.sh

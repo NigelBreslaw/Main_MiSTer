@@ -1220,16 +1220,9 @@ static const char *get_rbf_path(const char *rbfname)
 	return path;
 }
 
-static const char *get_rbf(const char *xml, int arcade)
+const char *mra_resolve_rbf_name(const char *rbfname, int arcade)
 {
-	static char rbfname[kBigTextSize];
-
-	rbfname[0] = 0;
-	SAX_Callbacks sax;
-	SAX_Callbacks_init(&sax);
-
-	sax.all_event = xml_scan_rbf;
-	XMLDoc_parse_file_SAX(xml, &sax, rbfname);
+	if (!rbfname || !rbfname[0]) return NULL;
 
 	/* once we have the rbfname fragment from the MRA xml file
 	 * search the arcade folder for the match */
@@ -1258,7 +1251,8 @@ static const char *get_rbf(const char *xml, int arcade)
 	}
 
 	int len;
-	static char lastfound[256] = {};
+	char lastfound[256] = {};
+	static char resolved[kBigTextSize];
 	while ((entry = readdir(dir)) != NULL)
 	{
 		len = strlen(entry->d_name);
@@ -1292,10 +1286,24 @@ static const char *get_rbf(const char *xml, int arcade)
 		}
 	}
 
-	if (lastfound[0]) snprintf(rbfname, sizeof(rbfname), "%s/%s", dirname, lastfound);
+	if (lastfound[0]) snprintf(resolved, sizeof(resolved), "%s/%s", dirname, lastfound);
 	closedir(dir);
 
-	return lastfound[0] ? rbfname : NULL;
+	return lastfound[0] ? resolved : NULL;
+}
+
+static const char *get_rbf(const char *xml, int arcade)
+{
+	static char rbfname[kBigTextSize];
+
+	rbfname[0] = 0;
+	SAX_Callbacks sax;
+	SAX_Callbacks_init(&sax);
+
+	sax.all_event = xml_scan_rbf;
+	XMLDoc_parse_file_SAX(xml, &sax, rbfname);
+
+	return mra_resolve_rbf_name(rbfname, arcade);
 }
 
 int xml_load(const char *xml)
@@ -1442,6 +1450,22 @@ mgl_struct* mgl_parse(const char *xml)
 	sax.all_event = scan_mgl;
 	XMLDoc_parse_file_SAX(xml, &sax, 0);
 
+	return &mgl;
+}
+
+mgl_struct* mgl_seed_launch_plan(const char *payload_path, const char *mount_kind, int mount_index, int delay_secs)
+{
+	memset(&mgl, 0, sizeof(mgl));
+	if (!payload_path || !payload_path[0]) return &mgl;
+	mgl.item[0].action = MGL_ACTION_LOAD;
+	mgl.item[0].delay = delay_secs < 0 ? 0 : delay_secs;
+	mgl.item[0].type = (mount_kind && !strcasecmp(mount_kind, "load-file")) ? 'F' : 'S';
+	mgl.item[0].index = mount_index < 0 ? 0 : mount_index;
+	snprintf(mgl.item[0].path, sizeof(mgl.item[0].path), "%s", payload_path);
+	mgl.item[0].valid = 1;
+	mgl.count = 1;
+	printf("MGL seeded launch plan\n  action=load\n  delay=%d\n  type=%c\n  index=%d\n  path=%s\n\n",
+	       mgl.item[0].delay, mgl.item[0].type, mgl.item[0].index, mgl.item[0].path);
 	return &mgl;
 }
 

@@ -243,6 +243,7 @@ const char* get_rbf_name();
 const char* get_rbf_path();
 
 uint16_t sdram_sz(int sz = -1);
+uint16_t user_io_ensure_sdram_config();
 int user_io_is_dualsdr();
 uint16_t altcfg(int alt = -1);
 

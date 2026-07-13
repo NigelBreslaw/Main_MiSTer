@@ -13,6 +13,7 @@
 #include "../../osd.h"
 #include "../../menu.h"
 #include "../../shmem.h"
+#include "../mister_magik/neogeo_memory.h"
 
 struct NeoFile
 {
@@ -1259,9 +1260,13 @@ int neogeo_romset_tx(char* name, int cd_en)
 	}
 
 	if (crom_start < 0x300000) crom_start = 0x300000;
-	uint32_t crom_max = crom_start + crom_sz_max;
 	uint16_t ram_sz = sdram_sz() & 3;
-	if ((!user_io_is_dualsdr() || !fpga_get_io_type()) && ((ram_sz == 2 && crom_max > 0x4000000) || (ram_sz == 1 && crom_max > 0x2000000) || !ram_sz))
+	if (magik_neogeo_graphics_memory_warning_needed(
+	        ram_sz,
+	        user_io_is_dualsdr() != 0,
+	        fpga_get_io_type() != 0,
+	        crom_start,
+	        crom_sz_max))
 	{
 		Info("Not enough memory!\nGraphics will be corrupted");
 		sleep(2);

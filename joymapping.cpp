@@ -12,8 +12,11 @@ This file contains lookup information on known controllers
 #include "input.h"
 #include "user_io.h"
 #include "cfg.h"
+#include "support/mister_magik/button_overrides.h"
 
 #define DPAD_COUNT 4
+static const char MAGIK_INPUT_POLICY_PATH[] = "/tmp/mister-magik/input-policy";
+static const char MAGIK_BUTTON_OVERRIDES_PATH[] = "/tmp/mister-magik/button-overrides";
 
 /*****************************************************************************/
 static void trim(char * s)
@@ -114,6 +117,17 @@ static int is_fire(char* name)
 	return 0;
 }
 
+static bool magik_simple_input_active()
+{
+	FILE *f = fopen(MAGIK_INPUT_POLICY_PATH, "r");
+	if (!f) return false;
+
+	char buf[32] = {};
+	bool active = fgets(buf, sizeof(buf), f) && !strncmp(buf, "simple", 6);
+	fclose(f);
+	return active;
+}
+
 void map_joystick(uint32_t *map, uint32_t *mmap)
 {
 	/*
@@ -144,6 +158,19 @@ void map_joystick(uint32_t *map, uint32_t *mmap)
 		map[SYS_BTN_DOWN] = ((key + 1) << 16) | map[SYS_BTN_DOWN];
 	}
 
+	char magik_overrides[NUMBUTTONS][32];
+	bool magik_unmap[NUMBUTTONS];
+	bool simple_input = magik_simple_input_active() && !is_menu();
+	if (simple_input)
+	{
+		int loaded = magik_button_overrides_load(MAGIK_BUTTON_OVERRIDES_PATH, magik_overrides, magik_unmap, NUMBUTTONS);
+		if (loaded > 0) printf("MiSTer MagiK simple input: loaded %d button overrides\n", loaded);
+	}
+	else
+	{
+		magik_button_overrides_clear(magik_overrides, magik_unmap, NUMBUTTONS);
+	}
+
 	// loop through core requested buttons and construct result map
 	for (int i=0, n=0; i<joy_count; i++)
 	{
@@ -155,6 +182,18 @@ void map_joystick(uint32_t *map, uint32_t *mmap)
 
 		char *p = strchr(btn_name, '|');
 		if (p) *p = 0;
+		trim(btn_name);
+
+		if (simple_input && magik_unmap[i])
+		{
+			map[idx] = 0;
+			n++;
+			continue;
+		}
+		if (simple_input && magik_overrides[i][0])
+		{
+			strcpy(btn_name, magik_overrides[i]);
+		}
 
 		if(!strcasecmp(btn_name, "A")
 		|| !strcasecmp(btn_name, "Jump")

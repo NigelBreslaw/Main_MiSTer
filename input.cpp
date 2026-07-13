@@ -1690,6 +1690,45 @@ void sysled_enable(int en)
 }
 
 #define JOYMAP_DIR  "inputs/"
+static const char MAGIK_INPUT_POLICY_PATH[] = "/tmp/mister-magik/input-policy";
+static const char MAGIK_INPUT_DIR[] = "/media/fat/mister-magik/input";
+static char *get_unique_mapping(int dev, int force_unique = 0);
+
+static bool magik_simple_input_active()
+{
+	FILE *f = fopen(MAGIK_INPUT_POLICY_PATH, "r");
+	if (!f) return false;
+
+	char buf[32] = {};
+	bool active = fgets(buf, sizeof(buf), f) && !strncmp(buf, "simple", 6);
+	fclose(f);
+	return active;
+}
+
+static int magik_load_simple_map(int dev, void *pBuffer, int size)
+{
+	char path[256] = {};
+	char *id = get_unique_mapping(dev);
+	snprintf(path, sizeof(path), "%s/input_%s%s_v3.map", MAGIK_INPUT_DIR, id, input[dev].mod ? "_m" : "");
+
+	FILE *f = fopen(path, "rb");
+	if (!f) return 0;
+
+	int ret = 0;
+	if (pBuffer && size > 0)
+	{
+		ret = fread(pBuffer, 1, size, f);
+	}
+	else
+	{
+		if (!fseek(f, 0, SEEK_END)) ret = ftell(f);
+	}
+	fclose(f);
+
+	if (ret > 0) printf("MiSTer MagiK simple input: loaded %s (%d bytes)\n", path, ret);
+	return ret;
+}
+
 static int load_map(const char *name, void *pBuffer, int size)
 {
 	char path[256] = { JOYMAP_DIR };
@@ -1824,7 +1863,7 @@ int get_map_advance()
 	return (mapping && !is_menu() && map_advance_timer && CheckTimer(map_advance_timer));
 }
 
-static char *get_unique_mapping(int dev, int force_unique = 0)
+static char *get_unique_mapping(int dev, int force_unique)
 {
 	uint32_t vidpid = (input[dev].vid << 16) | input[dev].pid;
 	static char str[128];
@@ -3004,15 +3043,18 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 		}
 		else if (input[dev].quirk != QUIRK_PDSP && input[dev].quirk != QUIRK_MSSP)
 		{
-			if (!load_map(get_map_name(dev, 1), &input[dev].mmap, sizeof(input[dev].mmap)))
+			bool simple_input = magik_simple_input_active() && !is_menu();
+			if (!((simple_input && magik_load_simple_map(dev, &input[dev].mmap, sizeof(input[dev].mmap)))
+				|| (!simple_input && load_map(get_map_name(dev, 1), &input[dev].mmap, sizeof(input[dev].mmap)))))
 			{
+				if (simple_input) printf("MiSTer MagiK simple input: no managed map for %s, using fallback\n", input[dev].idstr);
 				if (!gcdb_map_for_controller(input[sub_dev].bustype, input[sub_dev].vid, input[sub_dev].pid, input[sub_dev].gcdb_version, pool[sub_dev].fd, input[dev].mmap))
 				{
 					memset(input[dev].mmap, 0, sizeof(input[dev].mmap));
 					memcpy(input[dev].mmap, def_mmap, sizeof(def_mmap));
 					//input[dev].has_mmap++;
 				}
-			} else {
+			} else if (!simple_input) {
 				gcdb_show_string_for_ctrl_map(input[sub_dev].bustype, input[sub_dev].vid, input[sub_dev].pid, input[sub_dev].gcdb_version, pool[sub_dev].fd, input[sub_dev].name, input[dev].mmap);
 			}
 			if (!input[dev].mmap[SYS_BTN_OSD_KTGL + 2]) input[dev].mmap[SYS_BTN_OSD_KTGL + 2] = input[dev].mmap[SYS_BTN_OSD_KTGL + 1];
@@ -3062,6 +3104,19 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 			memset(input[dev].map, 0, sizeof(input[dev].map));
 			input[dev].map[map_paddle_btn()] = 0x120;
 		}
+		else if (magik_simple_input_active() && !is_menu())
+		{
+			memset(input[dev].map, 0, sizeof(input[dev].map));
+			if (input[dev].has_mmap == 1)
+			{
+				map_joystick(input[dev].map, input[dev].mmap);
+			}
+			else
+			{
+				input[dev].has_map++;
+			}
+			input[dev].has_map++;
+		}
 		else if (!load_map(get_map_name(dev, 0), &input[dev].map, sizeof(input[dev].map)))
 		{
 			memset(input[dev].map, 0, sizeof(input[dev].map));
@@ -3084,7 +3139,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 
 	if (!input[dev].has_advanced_map)
 	{
-		input_advanced_load(dev);
+		if (!magik_simple_input_active() || is_menu()) input_advanced_load(dev);
 		input[dev].has_advanced_map = true;
 	}
 

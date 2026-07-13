@@ -34,6 +34,7 @@ struct VideoInfo
 extern VideoInfo current_video_info;
 
 void  video_init();
+void  video_reinit();
 void  video_poll();
 
 int   video_get_edid(uint8_t **buf, int *size);

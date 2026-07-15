@@ -35,6 +35,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-return"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/menu_path.cpp" \
+  "$ROOT/tests/menu_path_test.cpp" \
+  -o "$OUT-menu-path"
+"$OUT-menu-path"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/button_overrides.cpp" \
   "$ROOT/tests/button_overrides_test.cpp" \
   -o "$OUT-button-overrides"

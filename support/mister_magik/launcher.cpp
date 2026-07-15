@@ -4,6 +4,7 @@
 #include "launcher_diag.h"
 #include "launcher_return.h"
 #include "launcher_wait.h"
+#include "menu_path.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -45,7 +46,6 @@ static const char s_deploy_lock_path[] = "/media/fat/mister-magik/deploy.lock";
 static const char s_launcher_env_path[] = "/media/fat/mister-magik/launcher.env";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
-static const char s_latch_rbf_path[] = "/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf";
 static const char s_scanout_slots_module_path[] = "/media/fat/mister-magik/mister_magik_scanout_slots.ko";
 static const char s_artifact_verify_command[] =
 	"set -e; "
@@ -1163,9 +1163,10 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 	if (!mister_magik_launcher_configured()) return false;
 	bool default_menu = !path || !path[0];
 	if (!default_menu && strcasecmp(path, "menu.rbf") && strcasecmp(path, "/media/fat/menu.rbf")) return false;
-	if (access(s_latch_rbf_path, R_OK) != 0)
+	const char *latch_rbf_path = magik_latch_menu_path();
+	if (access(latch_rbf_path, R_OK) != 0)
 	{
-		eventf("latch_menu_rbf_missing", "path=%s", s_latch_rbf_path);
+		eventf("latch_menu_rbf_missing", "path=%s", latch_rbf_path);
 		return false;
 	}
 	if (system(s_artifact_verify_command) != 0)
@@ -1173,9 +1174,9 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 		eventf("latch_artifact_verification_failed", "fallback=stock-menu");
 		return false;
 	}
-	eventf("latch_menu_rbf_load", "from=%s to=%s", default_menu ? "(default-menu)" : path, s_latch_rbf_path);
+	eventf("latch_menu_rbf_load", "from=%s to=%s", default_menu ? "(default-menu)" : path, latch_rbf_path);
 	magik_launcher_mark_latch_menu_return(path);
-	fpga_load_rbf(s_latch_rbf_path);
+	fpga_load_rbf(latch_rbf_path);
 	return true;
 }
 

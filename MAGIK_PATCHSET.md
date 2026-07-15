@@ -86,6 +86,10 @@ reapplied at their narrow integration seams.
   itself on that core, and loads the persistent stock-kernel plugin probe
   module before starting Rust so the launcher can use hidden-buffer latch mode
   by default.
+- Keep that production latch RBF's physical path for loading and verification,
+  but present it to Menu's core browser as logical root-level `menu.rbf` so
+  `mister_magik_exit_to_menu` opens the normal top-level MiSTer view instead of
+  exposing the private `mister-magik/fpga` deployment directory.
 
 ## Approved Patch Surface
 
@@ -103,9 +107,11 @@ Runtime changes should stay in or immediately around:
 - `scheduler.cpp` dormant-mode polling seam
 - `main.cpp` only for the non-scheduler dormant launcher wait hook
 - narrow command handoff wiring needed to launch through Main
+- `menu.cpp` only for the production latch RBF's logical root-level core-browser
+  identity and minimal diagnostic guards
 - `video.h` only for exposing existing video diagnostic entrypoints to MagiK
   command handlers
-- minimal diagnostic guards in OSD/video/menu entrypoints
+- minimal diagnostic guards in OSD/video entrypoints
 
 Build/docs/test changes may touch:
 
@@ -277,7 +283,10 @@ Update this section in every PR that adds behavior.
   bounded write-combined hidden framebuffer slots. Main status exposes both
   module-loaded and slot-device-ready booleans. If the latch RBF is absent, Main
   logs `latch_menu_rbf_missing` and continues on the stock Menu path so Rust can
-  fall back to `/dev/fb0`.
+  fall back to `/dev/fb0`. The core browser maps only that exact physical latch
+  path to logical root-level `menu.rbf`, so exit-to-menu keeps the qualified
+  RBF active without exposing its private deployment directory; a host path
+  test covers exact, null, stock, and near-matching inputs.
 
 ## Verification
 
@@ -288,7 +297,9 @@ Update this section in every PR that adds behavior.
   FIFO, and `SIGCHLD` wake behavior for MagiK-owned launcher states. The
   return-marker test proves that an
   explicit `menu.rbf` return survives the latch Menu re-exec exactly once and
-  is not inherited by later core launches.
+  is not inherited by later core launches. The Menu-path test proves that only
+  the exact production latch RBF receives the logical root-level `menu.rbf`
+  browser identity; normal and near-matching RBF paths remain unchanged.
 - `scripts/check-magik-patch-surface.sh` compares this fork with the upstream
   release baseline and fails if files outside the approved patch surface
   changed, including the narrow structured-handoff allowance for
@@ -547,6 +558,7 @@ Host tests:
   `BeginEnterLauncher -> EnteringLauncher` for supervised restart.
 - Status/event contract tests.
 - Invariant event formatting tests.
+- Production latch Menu browser-path identity tests.
 - Patch-surface check.
 - Main container build.
 - Rebuild parity after env/restart changes.

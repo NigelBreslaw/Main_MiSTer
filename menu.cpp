@@ -67,6 +67,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "profiling.h"
 #include "str_util.h"
 #include "autofire.h"
+#include "support/mister_magik/menu_path.h"
 
 /*menu states*/
 enum MENU
@@ -424,11 +425,19 @@ void SelectFile(const char* path, const char* pFileExt, int Options, unsigned ch
 
 	if (Options & SCANO_CORES)
 	{
-		strcpy(selPath, get_rbf_dir());
-		if (strlen(get_rbf_name()))
+		const char *path_override = magik_menu_browser_path_override(get_rbf_path());
+		if (path_override)
 		{
-			if(strlen(selPath)) strcat(selPath, "/");
-			strcat(selPath, get_rbf_name());
+			strcpy(selPath, path_override);
+		}
+		else
+		{
+			strcpy(selPath, get_rbf_dir());
+			if (strlen(get_rbf_name()))
+			{
+				if(strlen(selPath)) strcat(selPath, "/");
+				strcat(selPath, get_rbf_name());
+			}
 		}
 		ResolveExistingCorePath(selPath);
 		pFileExt = "RBFMRAMGL";

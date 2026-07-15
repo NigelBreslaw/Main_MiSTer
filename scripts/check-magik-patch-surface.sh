@@ -22,7 +22,7 @@ allowed_path() {
     support/arcade/mra_loader.cpp|support/arcade/mra_loader.h) return 0 ;;
     support/neogeo/neogeo_loader.cpp) return 0 ;;
     tests/*) return 0 ;;
-    input.cpp|joymapping.cpp|main.cpp|scheduler.cpp|user_io.cpp|user_io.h|osd.cpp|video.cpp|video.h) return 0 ;;
+    input.cpp|joymapping.cpp|main.cpp|menu.cpp|scheduler.cpp|user_io.cpp|user_io.h|osd.cpp|video.cpp|video.h) return 0 ;;
   esac
   return 1
 }

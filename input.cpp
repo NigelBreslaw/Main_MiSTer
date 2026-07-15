@@ -36,6 +36,7 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "file_io.h"
+#include "support/mister_magik/layout.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -1691,7 +1692,6 @@ void sysled_enable(int en)
 
 #define JOYMAP_DIR  "inputs/"
 static const char MAGIK_INPUT_POLICY_PATH[] = "/tmp/mister-magik/input-policy";
-static const char MAGIK_INPUT_DIR[] = "/media/fat/mister-magik/input";
 static char *get_unique_mapping(int dev, int force_unique = 0);
 
 static bool magik_simple_input_active()
@@ -1708,8 +1708,10 @@ static bool magik_simple_input_active()
 static int magik_load_simple_map(int dev, void *pBuffer, int size)
 {
 	char path[256] = {};
+	char input_dir[256] = {};
 	char *id = get_unique_mapping(dev);
-	snprintf(path, sizeof(path), "%s/input_%s%s_v3.map", MAGIK_INPUT_DIR, id, input[dev].mod ? "_m" : "");
+	magik_app_path(input_dir, sizeof(input_dir), "input");
+	snprintf(path, sizeof(path), "%s/input_%s%s_v3.map", input_dir, id, input[dev].mod ? "_m" : "");
 
 	FILE *f = fopen(path, "rb");
 	if (!f) return 0;

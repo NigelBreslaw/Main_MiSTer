@@ -9,11 +9,13 @@ reapply only the features and tests listed here.
 - Upstream project: `MiSTer-devel/Main_MiSTer`
 - Baseline commit: `93d13fb690db4581768389450fb639822ae88333`
 - Baseline release: `Release 20260707.`
-- Fork binary: `/media/fat/MiSTer_MagiK`
-- Slint child binary: `/media/fat/mister-magik/mister-magik-fb`
-- Platform manifest: `/media/fat/mister-magik/platform-v1.manifest`
-- Production latch RBF:
-  `/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf`
+- Public fork/app: `/media/fat/MiSTer_MagiK` and `/media/fat/mister-magik/`
+- Development fork/app: `/media/fat/MiSTer_MagiKDev` and
+  `/media/fat/mister-magik-dev/`
+- The fork selects the matching application root from its executable name; all
+  launcher, manifest, module, RBF, input, environment, crash, and log paths use
+  that root.
+- Layout-specific latch RBF: `<application-root>/fpga/menu-magik-vblank-latch.rbf`.
 
 The 20260707 refresh was rebuilt as a compact patch stack rather than replaying
 the historical development commits. Upstream changes in `input.cpp`,

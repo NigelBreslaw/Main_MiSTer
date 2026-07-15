@@ -35,10 +35,20 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-return"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/layout.cpp" \
   "$ROOT/support/mister_magik/menu_path.cpp" \
   "$ROOT/tests/menu_path_test.cpp" \
   -o "$OUT-menu-path"
 "$OUT-menu-path"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/layout.cpp" \
+  "$ROOT/tests/layout_test.cpp" \
+  -o "$OUT-layout"
+"$OUT-layout"
+DEV_LAYOUT_EXE="$(dirname "$OUT-layout")/MiSTer_MagiKDev"
+cp "$OUT-layout" "$DEV_LAYOUT_EXE"
+"$DEV_LAYOUT_EXE"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/button_overrides.cpp" \
@@ -96,11 +106,12 @@ if grep -q 'library-refresh' "$ROOT/support/mister_magik/launcher.cpp"; then
 fi
 
 grep -q 'mister_magik_scanout_slots.ko' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q '/media/fat/mister-magik/platform-v1.manifest' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q '/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'magik_app_path' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q '/media/fat/mister-magik/' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q '/media/fat/mister-magik/experiments' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_artifact_verification_failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'main_sha256' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'catalog_builder_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"

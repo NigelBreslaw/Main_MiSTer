@@ -4,6 +4,7 @@
 #include "launcher_diag.h"
 #include "launcher_return.h"
 #include "launcher_wait.h"
+#include "layout.h"
 #include "menu_path.h"
 
 #include <errno.h>
@@ -20,6 +21,7 @@
 #include <unistd.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
+#include <limits.h>
 
 #include "file_io.h"
 #include "fpga_io.h"
@@ -32,41 +34,48 @@
 
 extern int video_magik_route_black();
 
-static const char s_launcher_path[] = "mister-magik/mister-magik-fb";
 static const char s_script_path[] = "/tmp/mister_magik_launcher";
 static const char s_log_path[] = "/tmp/mister-magik-main.log";
 static const char s_status_dir[] = "/tmp/mister-magik";
 static const char s_status_path[] = "/tmp/mister-magik/main-status.json";
 static const char s_events_path[] = "/tmp/mister-magik/events.jsonl";
-static const char s_reboot_log_dir[] = "/media/fat/mister-magik/bootlogs";
-static const char s_reboot_log_path[] = "/media/fat/mister-magik/bootlogs/main-reboot.log";
-static const char s_crash_dir[] = "/media/fat/mister-magik/crashes";
-static const char s_latest_crash_path[] = "/media/fat/mister-magik/crashes/latest.json";
-static const char s_deploy_lock_path[] = "/media/fat/mister-magik/deploy.lock";
-static const char s_launcher_env_path[] = "/media/fat/mister-magik/launcher.env";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
-static const char s_scanout_slots_module_path[] = "/media/fat/mister-magik/mister_magik_scanout_slots.ko";
-static const char s_artifact_verify_command[] =
+static const char *layout_path(const char *relative)
+{
+	static char slots[8][PATH_MAX];
+	static unsigned int next = 0;
+	char *out = slots[next++ % 8];
+	magik_app_path(out, PATH_MAX, relative);
+	return out;
+}
+
+static const char *artifact_verify_command()
+{
+	static char command[8192];
+	snprintf(command, sizeof(command),
 	"set -e; "
-	"manifest=/media/fat/mister-magik/platform-v1.manifest; "
-	"get() { value=$(sed -n \"s/^$1=//p\" \"$manifest\"); test -n \"$value\"; test \"$(grep -c \"^$1=\" \"$manifest\")\" -eq 1; printf %s \"$value\"; }; "
-	"main=/media/fat/MiSTer_MagiK; "
-	"gui=/media/fat/mister-magik/mister-magik-fb; "
-	"module=/media/fat/mister-magik/mister_magik_scanout_slots.ko; "
-	"module_meta=/media/fat/mister-magik/mister_magik_scanout_slots.metadata.txt; "
-	"rbf=/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf; "
-	"rbf_meta=/media/fat/mister-magik/fpga/menu-magik-vblank-latch.metadata.txt; "
-	"test -r \"$manifest\" -a -r \"$main\" -a -r \"$gui\" -a -r \"$module\" -a -r \"$module_meta\" -a -r \"$rbf\" -a -r \"$rbf_meta\"; "
+	"manifest=%s/platform-v1.manifest; "
+	"get() { value=$(sed -n \"s/^$1=//p\" \"$manifest\"); test -n \"$value\"; test \"$(grep -c \"^$1=\" \"$manifest\")\" -eq 1; printf %%s \"$value\"; }; "
+	"main=%s; "
+	"gui=%s/mister-magik-fb; "
+	"catalog_builder=%s/mister-magik-catalog-builder; "
+	"module=%s/mister_magik_scanout_slots.ko; "
+	"module_meta=%s/mister_magik_scanout_slots.metadata.txt; "
+	"rbf=%s/fpga/menu-magik-vblank-latch.rbf; "
+	"rbf_meta=%s/fpga/menu-magik-vblank-latch.metadata.txt; "
+	"test -r \"$manifest\" -a -r \"$main\" -a -r \"$gui\" -a -r \"$catalog_builder\" -a -r \"$module\" -a -r \"$module_meta\" -a -r \"$rbf\" -a -r \"$rbf_meta\"; "
 	"test \"$(get format)\" = mister-magik-platform-v1; "
 	"test \"$(get main_path)\" = \"$main\"; "
 	"test \"$(get gui_path)\" = \"$gui\"; "
+	"test \"$(get catalog_builder_path)\" = \"$catalog_builder\"; "
 	"test \"$(get scanout_module_path)\" = \"$module\"; "
 	"test \"$(get scanout_metadata_path)\" = \"$module_meta\"; "
 	"test \"$(get latch_rbf_path)\" = \"$rbf\"; "
 	"test \"$(get latch_metadata_path)\" = \"$rbf_meta\"; "
 	"main_hash=$(get main_sha256); "
 	"gui_hash=$(get gui_sha256); "
+	"catalog_builder_hash=$(get catalog_builder_sha256); "
 	"module_hash=$(get scanout_module_sha256); "
 	"module_meta_hash=$(get scanout_metadata_sha256); "
 	"rbf_hash=$(get latch_rbf_sha256); "
@@ -75,11 +84,12 @@ static const char s_artifact_verify_command[] =
 	"main_revision=$(get main_revision); "
 	"magik_revision=$(get magik_revision); "
 	"menu_revision=$(get menu_revision); "
-	"test ${#main_hash} -eq 64 -a ${#gui_hash} -eq 64 -a ${#module_hash} -eq 64 -a ${#module_meta_hash} -eq 64 -a ${#rbf_hash} -eq 64 -a ${#rbf_meta_hash} -eq 64 -a ${#contract} -eq 64; "
+	"test ${#main_hash} -eq 64 -a ${#gui_hash} -eq 64 -a ${#catalog_builder_hash} -eq 64 -a ${#module_hash} -eq 64 -a ${#module_meta_hash} -eq 64 -a ${#rbf_hash} -eq 64 -a ${#rbf_meta_hash} -eq 64 -a ${#contract} -eq 64; "
 	"test ${#main_revision} -eq 40 -a ${#magik_revision} -eq 40 -a ${#menu_revision} -eq 40; "
-	"case \"$main_hash$gui_hash$module_hash$module_meta_hash$rbf_hash$rbf_meta_hash$contract$main_revision$magik_revision$menu_revision\" in *[!0-9a-f]*) exit 1;; esac; "
+	"case \"$main_hash$gui_hash$catalog_builder_hash$module_hash$module_meta_hash$rbf_hash$rbf_meta_hash$contract$main_revision$magik_revision$menu_revision\" in *[!0-9a-f]*) exit 1;; esac; "
 	"test \"$(sha256sum \"$main\" | awk '{print $1}')\" = \"$main_hash\"; "
 	"test \"$(sha256sum \"$gui\" | awk '{print $1}')\" = \"$gui_hash\"; "
+	"test \"$(sha256sum \"$catalog_builder\" | awk '{print $1}')\" = \"$catalog_builder_hash\"; "
 	"test \"$(sha256sum \"$module\" | awk '{print $1}')\" = \"$module_hash\"; "
 	"test \"$(sha256sum \"$module_meta\" | awk '{print $1}')\" = \"$module_meta_hash\"; "
 	"test \"$(sha256sum \"$rbf\" | awk '{print $1}')\" = \"$rbf_hash\"; "
@@ -88,7 +98,11 @@ static const char s_artifact_verify_command[] =
 	"grep -qx \"platform_contract_sha256=$contract\" \"$rbf_meta\"; "
 	"grep -qx \"module_sha256=$module_hash\" \"$module_meta\"; "
 	"grep -qx \"rbf_sha256=$rbf_hash\" \"$rbf_meta\"; "
-	"grep -qx \"source_commit=$menu_revision\" \"$rbf_meta\"";
+	"grep -qx \"source_commit=$menu_revision\" \"$rbf_meta\"",
+	magik_app_dir(), magik_main_path(), magik_app_dir(), magik_app_dir(),
+	magik_app_dir(), magik_app_dir(), magik_app_dir(), magik_app_dir());
+	return command;
+}
 static const int s_maintenance_poll_ms = 1000;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
@@ -273,21 +287,21 @@ static void write_crash_report_file(const char *report_id, const char *path, pid
 
 static void record_launcher_crash_report(pid_t old_pid, int status, const char *kind)
 {
-	mkdir("/media/fat/mister-magik", 0755);
-	mkdir(s_crash_dir, 0755);
+	mkdir(magik_app_dir(), 0755);
+	mkdir(layout_path("crashes"), 0755);
 	char report_id[128];
 	snprintf(report_id, sizeof(report_id), "report-main-%lu-%d-%lu", GetTimer(0), old_pid, s_crash_count);
 	char path[256];
 	char tmp_path[280];
 	char latest_tmp_path[280];
-	snprintf(path, sizeof(path), "%s/%s.json", s_crash_dir, report_id);
+	snprintf(path, sizeof(path), "%s/%s.json", layout_path("crashes"), report_id);
 	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
-	snprintf(latest_tmp_path, sizeof(latest_tmp_path), "%s.tmp", s_latest_crash_path);
+	snprintf(latest_tmp_path, sizeof(latest_tmp_path), "%s.tmp", layout_path("crashes/latest.json"));
 	write_crash_report_file(report_id, tmp_path, old_pid, status, kind);
 	if (rename(tmp_path, path) == 0)
 	{
 		write_crash_report_file(report_id, latest_tmp_path, old_pid, status, kind);
-		rename(latest_tmp_path, s_latest_crash_path);
+		rename(latest_tmp_path, layout_path("crashes/latest.json"));
 		set_status_string(s_last_crash_report, sizeof(s_last_crash_report), "%s", path);
 		set_status_string(s_last_crash_report_id, sizeof(s_last_crash_report_id), "%s", report_id);
 		set_status_string(s_last_crash_kind, sizeof(s_last_crash_kind), "%s", kind ? kind : "child-exit");
@@ -313,9 +327,9 @@ static void log_msg(const char *fmt, ...)
 
 static void reboot_log(const char *stage, const char *fmt, ...)
 {
-	mkdir("/media/fat/mister-magik", 0755);
-	mkdir(s_reboot_log_dir, 0755);
-	FILE *f = fopen(s_reboot_log_path, "a");
+	mkdir(magik_app_dir(), 0755);
+	mkdir(layout_path("bootlogs"), 0755);
+	FILE *f = fopen(layout_path("bootlogs/main-reboot.log"), "a");
 	if (!f) return;
 	fprintf(
 	    f,
@@ -402,7 +416,7 @@ static bool transition(MagikLauncherEvent event)
 
 static bool deploy_lock_active(void)
 {
-	return access(s_deploy_lock_path, F_OK) == 0;
+	return access(layout_path("deploy.lock"), F_OK) == 0;
 }
 
 static void close_command_fifo(void)
@@ -871,11 +885,11 @@ static bool write_launcher_script(const char *path)
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
 	        return_spawn ? 1 : 0,
-	        s_launcher_env_path,
-	        s_launcher_env_path,
-	        s_artifact_verify_command,
-	        s_scanout_slots_module_path,
-	        s_scanout_slots_module_path);
+	        layout_path("launcher.env"),
+	        layout_path("launcher.env"),
+	        artifact_verify_command(),
+	        layout_path("mister_magik_scanout_slots.ko"),
+	        layout_path("mister_magik_scanout_slots.ko"));
 	fclose(f);
 	chmod(s_script_path, 0755);
 	eventf("launcher_script_written", "script=%s path=%s return_spawn=%d", s_script_path, path ? path : "", return_spawn ? 1 : 0);
@@ -886,18 +900,18 @@ static void spawn_launcher(void)
 {
 	if (deploy_lock_active())
 	{
-		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "deploy_lock_active path=%s", s_deploy_lock_path);
-		eventf("launcher_spawn_deferred_deploy_lock", "path=%s", s_deploy_lock_path);
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "deploy_lock_active path=%s", layout_path("deploy.lock"));
+		eventf("launcher_spawn_deferred_deploy_lock", "path=%s", layout_path("deploy.lock"));
 		return;
 	}
 
 	char path[2100];
-	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
+	strncpy(path, getFullPath(magik_launcher_relative_path()), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
-	if (!FileExists(s_launcher_path, 0))
+	if (!FileExists(magik_launcher_relative_path(), 0))
 	{
-		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", s_launcher_path);
-		eventf("launcher_missing", "path=%s", s_launcher_path);
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
+		eventf("launcher_missing", "path=%s", magik_launcher_relative_path());
 		return;
 	}
 	if (!write_launcher_script(path))
@@ -940,7 +954,7 @@ static void spawn_launcher(void)
 
 bool mister_magik_launcher_configured(void)
 {
-	return FileExists(s_launcher_path, 0) != 0;
+	return FileExists(magik_launcher_relative_path(), 0) != 0;
 }
 
 bool mister_magik_launcher_active(void)
@@ -1033,7 +1047,7 @@ void mister_magik_launcher_route_early_black(void)
 	eventf("early_black_main_route_failed", "fallback=fork_exec");
 
 	char path[2100];
-	strncpy(path, getFullPath(s_launcher_path), sizeof(path) - 1);
+	strncpy(path, getFullPath(magik_launcher_relative_path()), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
 	eventf("early_black_spawn", "path=%s", path);
 
@@ -1169,7 +1183,7 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 		eventf("latch_menu_rbf_missing", "path=%s", latch_rbf_path);
 		return false;
 	}
-	if (system(s_artifact_verify_command) != 0)
+	if (system(artifact_verify_command()) != 0)
 	{
 		eventf("latch_artifact_verification_failed", "fallback=stock-menu");
 		return false;

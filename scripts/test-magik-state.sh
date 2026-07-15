@@ -111,9 +111,38 @@ grep -q 'magik_app_path' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q '/media/fat/mister-magik/experiments' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_artifact_verification_failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'main_sha256' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'catalog_builder_sha256' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'platform-v2.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'legacy_manifest=.*platform-v1.manifest' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'mister-magik-scanout"' "$ROOT/support/mister_magik/launcher.cpp"
+
+verify_manifest_selection_fixture() {
+  local app="$1"
+  local manifest="$app/platform-v2.manifest"
+  local expected_format="mister-magik-platform-v2"
+  if [[ ! -r "$manifest" ]]; then
+    manifest="$app/platform-v1.manifest"
+    expected_format="mister-magik-platform-v1"
+  fi
+  [[ -r "$manifest" ]] || return 1
+  [[ "$(sed -n 's/^format=//p' "$manifest")" == "$expected_format" ]]
+}
+
+MANIFEST_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/mister-magik-manifest-test.XXXXXX")"
+trap 'rm -rf "$MANIFEST_FIXTURE"' EXIT
+
+printf 'format=mister-magik-platform-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
+
+rm "$MANIFEST_FIXTURE/platform-v2.manifest"
+printf 'format=mister-magik-platform-v1\n' >"$MANIFEST_FIXTURE/platform-v1.manifest"
+verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
+
+printf 'format=invalid-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+if verify_manifest_selection_fixture "$MANIFEST_FIXTURE"; then
+  echo "ERROR: an invalid v2 manifest must fail closed instead of falling back to v1" >&2
+  exit 1
+fi

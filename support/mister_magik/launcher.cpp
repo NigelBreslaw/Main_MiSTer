@@ -882,6 +882,11 @@ static bool write_launcher_script(const char *path)
 	        "else\n"
 	        "  echo 'scanout-slots-supervisor=device-missing' >>/tmp/mister-magik-slint.log\n"
 	        "fi\n"
+	        "if ! \"$MISTER_MAGIK_PATH\" latch-readiness-report >>/tmp/mister-magik-slint.log 2>&1; then\n"
+	        "  echo 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' >>/tmp/mister-magik-slint.log\n"
+	        "else\n"
+	        "  echo 'latch_startup_tsv valid=1 action=launch-latch-ui reason=ready' >>/tmp/mister-magik-slint.log\n"
+	        "fi\n"
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
 	        return_spawn ? 1 : 0,

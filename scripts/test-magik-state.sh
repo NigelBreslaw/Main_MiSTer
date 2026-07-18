@@ -116,6 +116,8 @@ grep -q 'legacy_manifest=.*platform-v1.manifest' "$ROOT/support/mister_magik/lau
 grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch-readiness-report' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'mister-magik-scanout"' "$ROOT/support/mister_magik/launcher.cpp"
 

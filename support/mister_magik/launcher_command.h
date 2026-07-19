@@ -9,6 +9,7 @@ enum class MagikLauncherCommandType
 	ExternalLaunch,
 	LaunchPlan,
 	ExitToMenu,
+	ReturnToLauncher,
 	Suspend,
 	Resume,
 	RestartLauncher,

@@ -20,6 +20,9 @@ int main()
 	MagikLauncherCommand cmd;
 	assert(magik_launcher_parse_command("mister_magik_exit_to_menu", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::ExitToMenu);
+	assert(magik_launcher_parse_command("mister_magik_return_to_launcher", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::ReturnToLauncher);
+	assert(!strcmp(magik_launcher_command_type_name(cmd.type), "ReturnToLauncher"));
 
 	assert(magik_launcher_parse_command("mister_magik_suspend", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Suspend);

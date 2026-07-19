@@ -445,7 +445,7 @@ static void ensure_reply_fifo(void)
 		eventf("command_reply_fifo_open_failed", "path=%s errno=%d", s_reply_fifo_path, errno);
 }
 
-static void command_reply(const char *result)
+void mister_magik_command_reply(const char *result)
 {
 	ensure_reply_fifo();
 	if (s_reply_fd < 0) return;
@@ -461,7 +461,7 @@ static void reply_commandf(const char *fmt, ...)
 	vsnprintf(reply, sizeof(reply), fmt, args);
 	va_end(args);
 	reply[sizeof(reply) - 1] = 0;
-	command_reply(reply);
+	mister_magik_command_reply(reply);
 }
 
 static void close_command_fifo(void)
@@ -513,7 +513,7 @@ static void finish_pending_launcher_reply(MagikLauncherSpawnResult result)
 	if (result == MagikLauncherSpawnResult::Deferred) return;
 	s_launcher_active_reply_pending = false;
 	if (result == MagikLauncherSpawnResult::Spawned)
-		command_reply("ok LauncherActive");
+		mister_magik_command_reply("ok LauncherActive");
 	else
 		reply_commandf("error %s", s_last_spawn_error[0] ? s_last_spawn_error : "launcher-start-failed");
 }
@@ -812,7 +812,7 @@ static void process_command_line(const char *line)
 	MagikLauncherCommand cmd;
 	if (!magik_launcher_parse_command(line, &cmd))
 	{
-		command_reply("error parse-failed");
+		mister_magik_command_reply("error parse-failed");
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Invalid)
@@ -833,7 +833,7 @@ static void process_command_line(const char *line)
 			reply_commandf("error path-unreadable");
 			return;
 		}
-		command_reply("ok HandoffStarted");
+		mister_magik_command_reply("ok HandoffStarted");
 		complete_handoff_to_game(cmd.path);
 		return;
 	}
@@ -849,7 +849,7 @@ static void process_command_line(const char *line)
 			reply_commandf("error path-unreadable");
 			return;
 		}
-		command_reply("ok HandoffStarted");
+		mister_magik_command_reply("ok HandoffStarted");
 		complete_handoff_to_game(cmd.path, true);
 		return;
 	}
@@ -862,20 +862,20 @@ static void process_command_line(const char *line)
 		}
 		if (!cmd.plan.core_path[0] || !cmd.plan.payload_path[0])
 		{
-			command_reply("error missing-fields");
+		mister_magik_command_reply("error missing-fields");
 			return;
 		}
 		if (!mra_resolve_rbf_name(cmd.plan.core_path, 0))
 		{
-			command_reply("error rbf-not-found");
+		mister_magik_command_reply("error rbf-not-found");
 			return;
 		}
 		if (access(cmd.plan.payload_path, R_OK) != 0)
 		{
-			command_reply("error payload-unreadable");
+		mister_magik_command_reply("error payload-unreadable");
 			return;
 		}
-		command_reply("ok HandoffStarted");
+		mister_magik_command_reply("ok HandoffStarted");
 		complete_handoff_to_game_plan(&cmd.plan);
 		return;
 	}
@@ -886,8 +886,16 @@ static void process_command_line(const char *line)
 			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 			return;
 		}
-		command_reply("ok HandoffStarted");
+		mister_magik_command_reply("ok HandoffStarted");
 		complete_handoff_to_menu();
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::ReturnToLauncher)
+	{
+		if (s_state == MagikLauncherState::LauncherActive)
+			mister_magik_command_reply("ok LauncherActive");
+		else
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Suspend)
@@ -953,7 +961,7 @@ static void process_command_line(const char *line)
 			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 			return;
 		}
-		command_reply("ok Rebooting");
+		mister_magik_command_reply("ok Rebooting");
 		reboot_launcher();
 		return;
 	}
@@ -964,7 +972,7 @@ static void process_command_line(const char *line)
 			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 			return;
 		}
-		command_reply("ok Resetting");
+		mister_magik_command_reply("ok Resetting");
 		direct_reset_launcher(true);
 		return;
 	}
@@ -975,11 +983,11 @@ static void process_command_line(const char *line)
 			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 			return;
 		}
-		command_reply("ok Resetting");
+		mister_magik_command_reply("ok Resetting");
 		direct_reset_launcher(false);
 		return;
 	}
-	command_reply("error unsupported-command");
+		mister_magik_command_reply("error unsupported-command");
 }
 
 static void poll_command_fifo(void)

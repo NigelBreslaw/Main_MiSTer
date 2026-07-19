@@ -394,6 +394,11 @@ refreshes `main-status.json` every five seconds as an event-loop heartbeat so
 callers can distinguish a responsive Main from a stopped one without command
 deadlines.
 
+Active-core return uses the dedicated acknowledged
+`mister_magik_return_to_launcher` command. Main replies `ok HandoffStarted`
+before loading `menu.rbf`; legacy generic `load_core` writers remain
+fire-and-forget and never enqueue replies.
+
 `/tmp/mister-magik/main-status.json` publishes `main_generation`,
 `executable_path`, `command_channel`, `command_ready_ms`, and
 `command_fifo_inode`. Readiness covers Main's generic command reader as well as

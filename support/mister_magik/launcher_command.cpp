@@ -41,6 +41,7 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	case MagikLauncherCommandType::ExternalLaunch: return "ExternalLaunch";
 	case MagikLauncherCommandType::LaunchPlan: return "LaunchPlan";
 	case MagikLauncherCommandType::ExitToMenu: return "ExitToMenu";
+	case MagikLauncherCommandType::ReturnToLauncher: return "ReturnToLauncher";
 	case MagikLauncherCommandType::Suspend: return "Suspend";
 	case MagikLauncherCommandType::Resume: return "Resume";
 	case MagikLauncherCommandType::RestartLauncher: return "RestartLauncher";
@@ -186,6 +187,11 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 	if (!strcmp(line, "mister_magik_exit_to_menu"))
 	{
 		cmd->type = MagikLauncherCommandType::ExitToMenu;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_return_to_launcher"))
+	{
+		cmd->type = MagikLauncherCommandType::ReturnToLauncher;
 		return true;
 	}
 	if (!strcmp(line, "mister_magik_suspend"))

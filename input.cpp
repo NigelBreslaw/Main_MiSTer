@@ -37,6 +37,7 @@
 #include "scaler.h"
 #include "file_io.h"
 #include "support/mister_magik/layout.h"
+#include "support/mister_magik/launcher.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -6303,6 +6304,11 @@ int input_test(int getchar)
 					printf("MiSTer_cmd: %s\n", cmd);
 					if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
 					else if (!strncmp(cmd, "video_mode ", 11)) video_mode_cmd(cmd + 11);
+					else if (!strcmp(cmd, "mister_magik_return_to_launcher"))
+					{
+						mister_magik_command_reply("ok HandoffStarted");
+						fpga_load_rbf("menu.rbf");
+					}
 					else if (!strncmp(cmd, "load_core ", 10))
 					{
 						if(isXmlName(cmd)) xml_load(cmd + 10);

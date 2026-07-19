@@ -1031,10 +1031,11 @@ void mister_magik_status_write(void)
 	fprintf(f, "\"main_generation\":%lu,", s_main_generation);
 	fprintf(f, "\"executable_path\":");
 	json_escape(f, s_executable_path[0] ? s_executable_path : "unknown");
-	fprintf(f, ",\"command_channel\":\"%s\",", s_cmd_fd >= 0 ? "ready" : "unavailable");
+	bool command_ready = s_cmd_fd >= 0 || input_command_fifo_ready();
+	fprintf(f, ",\"command_channel\":\"%s\",", command_ready ? "ready" : "unavailable");
 	fprintf(f, "\"command_ready_ms\":%lu,", s_command_ready_ms);
 	struct stat command_stat;
-	unsigned long command_inode = (s_cmd_fd >= 0 && !fstat(s_cmd_fd, &command_stat)) ? (unsigned long)command_stat.st_ino : 0;
+	unsigned long command_inode = (s_cmd_fd >= 0 && !fstat(s_cmd_fd, &command_stat)) ? (unsigned long)command_stat.st_ino : input_command_fifo_inode();
 	fprintf(f, "\"command_fifo_inode\":%lu,", command_inode);
 	fprintf(f, "\"launcher_pid\":%d,", s_pid);
 	fprintf(f, "\"launcher_state\":");

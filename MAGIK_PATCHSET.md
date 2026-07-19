@@ -349,6 +349,16 @@ Update this section in every PR that adds behavior.
 
 ## Device Smoke Results
 
+### Acknowledged command-channel status
+
+`/tmp/mister-magik/main-status.json` publishes `main_generation`,
+`executable_path`, `command_channel`, `command_ready_ms`, and
+`command_fifo_inode`. Readiness covers Main's generic command reader as well as
+the launcher-supervisor reader, because active-core return commands are handled
+by the generic reader. The status also reports the last launcher operation,
+result, and timestamp. Host tooling must use the authenticated MagiK agent and
+must not infer readiness from the FIFO pathname.
+
 2026-07-12, MiSTer at `192.168.1.117`, after deploying app commit `c598dada`
 and Main fork commit `2498c03`:
 

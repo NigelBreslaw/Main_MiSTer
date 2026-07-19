@@ -4108,6 +4108,17 @@ void send_map_cmd(int key)
 #define CMD_FIFO "/dev/MiSTer_cmd"
 #define LED_MONITOR "/sys/class/leds/hps_led0/brightness_hw_changed"
 
+int input_command_fifo_ready()
+{
+	return pool[NUMDEV + 1].fd >= 0;
+}
+
+unsigned long input_command_fifo_inode()
+{
+	struct stat st;
+	return input_command_fifo_ready() && !fstat(pool[NUMDEV + 1].fd, &st) ? (unsigned long)st.st_ino : 0;
+}
+
 // add sequential suffixes for non-merged devices
 void make_unique(uint16_t vid, uint16_t pid, int type)
 {

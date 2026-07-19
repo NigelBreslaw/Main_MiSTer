@@ -445,6 +445,11 @@ static void ensure_reply_fifo(void)
 		eventf("command_reply_fifo_open_failed", "path=%s errno=%d", s_reply_fifo_path, errno);
 }
 
+void mister_magik_reply_channel_init(void)
+{
+	ensure_reply_fifo();
+}
+
 void mister_magik_command_reply(const char *result)
 {
 	ensure_reply_fifo();

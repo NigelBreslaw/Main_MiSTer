@@ -5211,6 +5211,7 @@ int input_test(int getchar)
 
 		pool[NUMDEV+1].fd = open(CMD_FIFO, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		pool[NUMDEV+1].events = POLLIN;
+		mister_magik_reply_channel_init();
 
 		pool[NUMDEV + 2].fd = open(LED_MONITOR, O_RDONLY | O_CLOEXEC);
 		pool[NUMDEV + 2].events = POLLPRI;

@@ -12,4 +12,5 @@ void mister_magik_launcher_wait_for_activity(void);
 bool mister_magik_launcher_maybe_load_latch_menu(const char *path);
 void mister_magik_status_write(void);
 void mister_magik_command_reply(const char *result);
+void mister_magik_reply_channel_init(void);
 void mister_magik_record_invariant(const char *kind, const char *detail);

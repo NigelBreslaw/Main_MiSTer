@@ -11,6 +11,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-wait"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/launcher_reply.cpp" \
+  "$ROOT/tests/launcher_reply_test.cpp" \
+  -o "$OUT-reply"
+"$OUT-reply"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_state.cpp" \
   "$ROOT/tests/launcher_state_test.cpp" \
   -o "$OUT-state"

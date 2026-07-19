@@ -136,6 +136,12 @@ Update this section in every PR that adds behavior.
 - PR 2: host-testable launcher state machine skeleton and tests.
 - PR 3: boot hook, dormant scheduler path, Slint tty2 spawn, and status/events.
 - PR 4: explicit `mister_magik_launch` and `mister_magik_exit_to_menu` commands.
+- Direct command acknowledgements: pair `/dev/MiSTer_cmd` with the
+  human-readable `/dev/MiSTer_cmd_reply`, serialize callers externally, return
+  explicit `ok`, `rejected`, or `error` results from supervised launcher
+  command paths, and publish a five-second event-loop heartbeat. Main host tests
+  cover command parsing, state acceptance, and reply FIFO framing, closure, and
+  node-type safety; device-side agent/launcher tests cover response handling.
 - External `load_core` compatibility update: while the supervised launcher owns
   Main's command FIFO, absolute `.mgl`, `.mra`, and `.rbf` requests now enter
   the same `complete_handoff_to_game()` path as `mister_magik_launch`. The
@@ -369,6 +375,24 @@ Update this section in every PR that adds behavior.
 ## Device Smoke Results
 
 ### Acknowledged command-channel status
+
+State-changing MagiK commands have a paired reply FIFO at
+`/dev/MiSTer_cmd_reply`. Main writes one short line for every parsed command:
+`ok <state>`, `rejected <state>`, or `error <reason>`. Successful handoff replies
+mean that Main accepted a readable launch payload and began the handoff; they
+are written before Main terminates the supervised Slint child, not after the
+core loader returns. `ok LauncherActive` means Main successfully spawned the
+supervised launcher child and entered its `LauncherActive` state. It does not
+claim that the child has completed `exec` or rendered its first frame. Callers
+must serialize commands and drain any abandoned reply immediately before
+writing a new command. A caller must retain serialization ownership until it
+reads the reply or Main closes the channel; heartbeat failure starts supervisor
+recovery but does not permit another command against the same Main process.
+There is no command timeout that can abandon a delayed reply while Main remains
+alive. Legacy generic `load_core` commands do not write replies. Main also
+refreshes `main-status.json` every five seconds as an event-loop heartbeat so
+callers can distinguish a responsive Main from a stopped one without command
+deadlines.
 
 `/tmp/mister-magik/main-status.json` publishes `main_generation`,
 `executable_path`, `command_channel`, `command_ready_ms`, and

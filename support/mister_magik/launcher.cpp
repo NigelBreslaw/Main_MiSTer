@@ -1,5 +1,6 @@
 #include "launcher.h"
 #include "launcher_state.h"
+#include "launcher_reply.h"
 #include "launcher_command.h"
 #include "launcher_diag.h"
 #include "launcher_return.h"
@@ -104,6 +105,7 @@ static const char *artifact_verify_command()
 	return command;
 }
 static const int s_maintenance_poll_ms = 1000;
+static const unsigned long s_heartbeat_ms = 5000;
 static const int s_vt = 2;
 static const char s_tty[] = "tty2";
 static const char s_tty_path[] = "/dev/tty2";
@@ -112,6 +114,9 @@ static MagikLauncherState s_state = MagikLauncherState::Unconfigured;
 static pid_t s_pid = 0;
 static bool s_spawn_pending = false;
 static int s_cmd_fd = -1;
+static int s_reply_fd = -1;
+static const char s_reply_fifo_path[] = "/dev/MiSTer_cmd_reply";
+static bool s_launcher_active_reply_pending = false;
 static unsigned long s_main_generation = 0;
 static unsigned long s_command_ready_ms = 0;
 static char s_executable_path[PATH_MAX] = {};
@@ -432,6 +437,33 @@ static bool deploy_lock_active(void)
 	return access(layout_path("deploy.lock"), F_OK) == 0;
 }
 
+static void ensure_reply_fifo(void)
+{
+	if (s_reply_fd >= 0) return;
+	s_reply_fd = magik_launcher_reply_open(s_reply_fifo_path);
+	if (s_reply_fd < 0)
+		eventf("command_reply_fifo_open_failed", "path=%s errno=%d", s_reply_fifo_path, errno);
+}
+
+static void command_reply(const char *result)
+{
+	ensure_reply_fifo();
+	if (s_reply_fd < 0) return;
+	if (!magik_launcher_reply_write(s_reply_fd, result))
+		eventf("command_reply_write_failed", "errno=%d", errno);
+}
+
+static void reply_commandf(const char *fmt, ...)
+{
+	char reply[256];
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(reply, sizeof(reply), fmt, args);
+	va_end(args);
+	reply[sizeof(reply) - 1] = 0;
+	command_reply(reply);
+}
+
 static void close_command_fifo(void)
 {
 	if (s_cmd_fd >= 0)
@@ -448,6 +480,7 @@ static void ensure_command_fifo(void)
 	if (s_cmd_fd >= 0) return;
 	if (access(s_cmd_fifo_path, F_OK) != 0)
 		mkfifo(s_cmd_fifo_path, 0666);
+	ensure_reply_fifo();
 	s_cmd_fd = open(s_cmd_fifo_path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 	if (s_cmd_fd < 0)
 		eventf("command_fifo_open_failed", "path=%s errno=%d", s_cmd_fifo_path, errno);
@@ -465,7 +498,25 @@ static void ensure_command_fifo(void)
 }
 
 static void reset_launcher_tty(void);
-static void spawn_launcher(void);
+enum class MagikLauncherSpawnResult
+{
+	Spawned,
+	Deferred,
+	Failed,
+};
+
+static MagikLauncherSpawnResult spawn_launcher(void);
+
+static void finish_pending_launcher_reply(MagikLauncherSpawnResult result)
+{
+	if (!s_launcher_active_reply_pending) return;
+	if (result == MagikLauncherSpawnResult::Deferred) return;
+	s_launcher_active_reply_pending = false;
+	if (result == MagikLauncherSpawnResult::Spawned)
+		command_reply("ok LauncherActive");
+	else
+		reply_commandf("error %s", s_last_spawn_error[0] ? s_last_spawn_error : "launcher-start-failed");
+}
 
 static void set_status_string(char *dst, size_t len, const char *fmt, ...)
 {
@@ -760,77 +811,175 @@ static void process_command_line(const char *line)
 {
 	MagikLauncherCommand cmd;
 	if (!magik_launcher_parse_command(line, &cmd))
+	{
+		command_reply("error parse-failed");
 		return;
+	}
 	if (cmd.type == MagikLauncherCommandType::Invalid)
 	{
 		eventf("command_invalid", "%s", cmd.error);
+		reply_commandf("error %s", cmd.error);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Launch)
 	{
+		if (!magik_launcher_accepts_handoff(s_state))
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		if (access(cmd.path, R_OK) != 0)
+		{
+			reply_commandf("error path-unreadable");
+			return;
+		}
+		command_reply("ok HandoffStarted");
 		complete_handoff_to_game(cmd.path);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::ExternalLaunch)
 	{
+		if (!magik_launcher_accepts_handoff(s_state))
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		if (access(cmd.path, R_OK) != 0)
+		{
+			reply_commandf("error path-unreadable");
+			return;
+		}
+		command_reply("ok HandoffStarted");
 		complete_handoff_to_game(cmd.path, true);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::LaunchPlan)
 	{
+		if (!magik_launcher_accepts_handoff(s_state))
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		if (!cmd.plan.core_path[0] || !cmd.plan.payload_path[0])
+		{
+			command_reply("error missing-fields");
+			return;
+		}
+		if (!mra_resolve_rbf_name(cmd.plan.core_path, 0))
+		{
+			command_reply("error rbf-not-found");
+			return;
+		}
+		if (access(cmd.plan.payload_path, R_OK) != 0)
+		{
+			command_reply("error payload-unreadable");
+			return;
+		}
+		command_reply("ok HandoffStarted");
 		complete_handoff_to_game_plan(&cmd.plan);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::ExitToMenu)
 	{
+		if (!magik_launcher_accepts_handoff(s_state))
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		command_reply("ok HandoffStarted");
 		complete_handoff_to_menu();
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Suspend)
 	{
+		if (s_state != MagikLauncherState::LauncherActive && s_state != MagikLauncherState::LauncherSuspended)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
 		suspend_launcher();
+		reply_commandf("ok %s", magik_launcher_state_name(s_state));
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Resume)
 	{
+		if (s_state != MagikLauncherState::LauncherSuspended)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		s_launcher_active_reply_pending = true;
 		resume_launcher();
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::RestartLauncher)
 	{
+		if (magik_launcher_restart_action(s_state) == MagikLauncherRestartAction::Reject)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		s_launcher_active_reply_pending = true;
 		restart_launcher();
+		if (s_last_restart_error[0])
+		{
+			s_launcher_active_reply_pending = false;
+			reply_commandf("error %s", s_last_restart_error);
+		}
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::HdmiPowerCycle)
 	{
 		hdmi_power_cycle();
+		reply_commandf("ok %s", magik_launcher_state_name(s_state));
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::VideoAdjust)
 	{
 		video_adjust_diagnostic();
+		reply_commandf("ok %s", magik_launcher_state_name(s_state));
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::VideoReinit)
 	{
 		video_reinit_diagnostic();
+		reply_commandf("ok %s", magik_launcher_state_name(s_state));
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Reboot)
 	{
+		if (s_state != MagikLauncherState::LauncherActive)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		command_reply("ok Rebooting");
 		reboot_launcher();
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::DirectReset)
 	{
+		if (s_state != MagikLauncherState::LauncherActive)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		command_reply("ok Resetting");
 		direct_reset_launcher(true);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::DirectResetNoSync)
 	{
+		if (s_state != MagikLauncherState::LauncherActive)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		command_reply("ok Resetting");
 		direct_reset_launcher(false);
 		return;
 	}
+	command_reply("error unsupported-command");
 }
 
 static void poll_command_fifo(void)
@@ -937,13 +1086,13 @@ static bool write_launcher_script(const char *path)
 	return true;
 }
 
-static void spawn_launcher(void)
+static MagikLauncherSpawnResult spawn_launcher(void)
 {
 	if (deploy_lock_active())
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "deploy_lock_active path=%s", layout_path("deploy.lock"));
 		eventf("launcher_spawn_deferred_deploy_lock", "path=%s", layout_path("deploy.lock"));
-		return;
+		return MagikLauncherSpawnResult::Deferred;
 	}
 
 	char path[2100];
@@ -953,13 +1102,15 @@ static void spawn_launcher(void)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
 		eventf("launcher_missing", "path=%s", magik_launcher_relative_path());
-		return;
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
 	}
 	if (!write_launcher_script(path))
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
 		eventf("launcher_script_failed", "script=%s", s_script_path);
-		return;
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
 	}
 
 	user_io_osd_key_enable(0);
@@ -976,7 +1127,8 @@ static void spawn_launcher(void)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fork_failed errno=%d", errno);
 		eventf("launcher_fork_failed", "errno=%d", errno);
-		return;
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
 	}
 	if (!s_pid)
 	{
@@ -991,6 +1143,8 @@ static void spawn_launcher(void)
 	video_chvt(s_vt);
 	input_switch(0);
 	transition(MagikLauncherEvent::ChildSpawned);
+	finish_pending_launcher_reply(MagikLauncherSpawnResult::Spawned);
+	return MagikLauncherSpawnResult::Spawned;
 }
 
 bool mister_magik_launcher_configured(void)
@@ -1150,6 +1304,13 @@ void mister_magik_launcher_enter_after_menu_init(void)
 void mister_magik_launcher_poll(void)
 {
 	if (!mister_magik_launcher_configured()) return;
+	static unsigned long last_heartbeat_ms;
+	unsigned long now_ms = GetTimer(0);
+	if (!last_heartbeat_ms || now_ms - last_heartbeat_ms >= s_heartbeat_ms)
+	{
+		last_heartbeat_ms = now_ms;
+		mister_magik_status_write();
+	}
 
 	static bool scanout_slots_module_loaded;
 	static bool scanout_slots_device_ready;
@@ -1209,7 +1370,7 @@ void mister_magik_launcher_poll(void)
 
 	if (s_spawn_pending && s_state == MagikLauncherState::EnteringLauncher)
 	{
-		spawn_launcher();
+		(void)spawn_launcher();
 	}
 	if (magik_launcher_polls_commands(s_state))
 	{

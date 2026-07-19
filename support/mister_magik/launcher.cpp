@@ -115,6 +115,9 @@ static int s_cmd_fd = -1;
 static unsigned long s_main_generation = 0;
 static unsigned long s_command_ready_ms = 0;
 static char s_executable_path[PATH_MAX] = {};
+static char s_last_operation[64] = "startup";
+static char s_last_operation_result[32] = "completed";
+static unsigned long s_last_operation_ms = 0;
 static bool s_video_diagnostic_active = false;
 static unsigned long s_invariant_count = 0;
 static unsigned long s_crash_count = 0;
@@ -408,11 +411,18 @@ static bool transition(MagikLauncherEvent event)
 	MagikLauncherState next = s_state;
 	if (!magik_launcher_transition(s_state, event, &next))
 	{
+		snprintf(s_last_operation, sizeof(s_last_operation), "%s", magik_launcher_event_name(event));
+		snprintf(s_last_operation_result, sizeof(s_last_operation_result), "rejected");
+		s_last_operation_ms = GetTimer(0);
 		eventf("launcher_transition_rejected", "state=%s event=%s", magik_launcher_state_name(s_state), magik_launcher_event_name(event));
+		mister_magik_status_write();
 		return false;
 	}
 	eventf("launcher_transition", "from=%s event=%s to=%s", magik_launcher_state_name(s_state), magik_launcher_event_name(event), magik_launcher_state_name(next));
 	s_state = next;
+	snprintf(s_last_operation, sizeof(s_last_operation), "%s", magik_launcher_event_name(event));
+	snprintf(s_last_operation_result, sizeof(s_last_operation_result), "completed");
+	s_last_operation_ms = GetTimer(0);
 	mister_magik_status_write();
 	return true;
 }
@@ -1029,6 +1039,11 @@ void mister_magik_status_write(void)
 	fprintf(f, "\"launcher_pid\":%d,", s_pid);
 	fprintf(f, "\"launcher_state\":");
 	json_escape(f, magik_launcher_state_name(s_state));
+	fprintf(f, ",\"last_operation\":");
+	json_escape(f, s_last_operation);
+	fprintf(f, ",\"last_operation_result\":");
+	json_escape(f, s_last_operation_result);
+	fprintf(f, ",\"last_operation_ms\":%lu", s_last_operation_ms);
 	fprintf(f, ",\"launcher_active\":%s,", mister_magik_launcher_active() ? "true" : "false");
 	fprintf(f, "\"deploy_locked\":%s,", deploy_lock_active() ? "true" : "false");
 	fprintf(f, "\"crash_count\":%lu,", s_crash_count);

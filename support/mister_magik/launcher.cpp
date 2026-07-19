@@ -112,6 +112,9 @@ static MagikLauncherState s_state = MagikLauncherState::Unconfigured;
 static pid_t s_pid = 0;
 static bool s_spawn_pending = false;
 static int s_cmd_fd = -1;
+static unsigned long s_main_generation = 0;
+static unsigned long s_command_ready_ms = 0;
+static char s_executable_path[PATH_MAX] = {};
 static bool s_video_diagnostic_active = false;
 static unsigned long s_invariant_count = 0;
 static unsigned long s_crash_count = 0;
@@ -425,6 +428,8 @@ static void close_command_fifo(void)
 	{
 		close(s_cmd_fd);
 		s_cmd_fd = -1;
+		s_command_ready_ms = 0;
+		mister_magik_status_write();
 	}
 }
 
@@ -436,6 +441,17 @@ static void ensure_command_fifo(void)
 	s_cmd_fd = open(s_cmd_fifo_path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 	if (s_cmd_fd < 0)
 		eventf("command_fifo_open_failed", "path=%s errno=%d", s_cmd_fifo_path, errno);
+	else
+	{
+		if (!s_main_generation) s_main_generation = GetTimer(0);
+		if (!s_executable_path[0])
+		{
+			ssize_t len = readlink("/proc/self/exe", s_executable_path, sizeof(s_executable_path) - 1);
+			if (len > 0) s_executable_path[len] = 0;
+		}
+		s_command_ready_ms = GetTimer(0);
+		mister_magik_status_write();
+	}
 }
 
 static void reset_launcher_tty(void);
@@ -1001,6 +1017,15 @@ void mister_magik_status_write(void)
 	fprintf(f, "\"schema\":\"mister-magik-main-status-v2\",");
 	fprintf(f, "\"ts_boot_ms\":%lu,", GetTimer(0));
 	fprintf(f, "\"pid\":%d,", getpid());
+	if (!s_main_generation) s_main_generation = GetTimer(0);
+	fprintf(f, "\"main_generation\":%lu,", s_main_generation);
+	fprintf(f, "\"executable_path\":");
+	json_escape(f, s_executable_path[0] ? s_executable_path : "unknown");
+	fprintf(f, ",\"command_channel\":\"%s\",", s_cmd_fd >= 0 ? "ready" : "unavailable");
+	fprintf(f, "\"command_ready_ms\":%lu,", s_command_ready_ms);
+	struct stat command_stat;
+	unsigned long command_inode = (s_cmd_fd >= 0 && !fstat(s_cmd_fd, &command_stat)) ? (unsigned long)command_stat.st_ino : 0;
+	fprintf(f, "\"command_fifo_inode\":%lu,", command_inode);
 	fprintf(f, "\"launcher_pid\":%d,", s_pid);
 	fprintf(f, "\"launcher_state\":");
 	json_escape(f, magik_launcher_state_name(s_state));

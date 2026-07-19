@@ -503,13 +503,18 @@ static void stop_launcher_child(void)
 	s_pid = 0;
 }
 
-static void complete_handoff_to_game(const char *path)
+static void complete_handoff_to_game(const char *path, bool external = false)
 {
 	if (!magik_launcher_accepts_handoff(s_state))
 	{
-		eventf("handoff_rejected", "command=launch state=%s", magik_launcher_state_name(s_state));
+		if (external)
+			eventf("external_load_core_rejected", "state=%s", magik_launcher_state_name(s_state));
+		else
+			eventf("handoff_rejected", "command=launch state=%s", magik_launcher_state_name(s_state));
 		return;
 	}
+	if (external)
+		eventf("external_load_core_handoff", "path=%s", path ? path : "");
 	transition(MagikLauncherEvent::LaunchRequested);
 	s_spawn_pending = false;
 	close_command_fifo();
@@ -764,6 +769,11 @@ static void process_command_line(const char *line)
 	if (cmd.type == MagikLauncherCommandType::Launch)
 	{
 		complete_handoff_to_game(cmd.path);
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::ExternalLaunch)
+	{
+		complete_handoff_to_game(cmd.path, true);
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::LaunchPlan)

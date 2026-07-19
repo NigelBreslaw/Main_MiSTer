@@ -35,6 +35,10 @@ reapplied at their narrow integration seams.
   - `mister_magik_launch <absolute path>` for real `.mra`, `.mgl`, and `.rbf` paths
   - `mister_magik_launch_plan_v1 <encoded-plan>` for MagiK structured catalog rows
   - `mister_magik_exit_to_menu`
+- Preserve MiSTer's public `load_core <absolute path>` contract while the
+  supervised launcher owns the command FIFO. External `.mgl`, `.mra`, and
+  `.rbf` requests use the same real-path handoff as MagiK-owned launches;
+  inactive Main continues to use the stock command reader.
 - Accept explicit lifecycle commands:
   - `mister_magik_suspend`
   - `mister_magik_resume`
@@ -132,6 +136,13 @@ Update this section in every PR that adds behavior.
 - PR 2: host-testable launcher state machine skeleton and tests.
 - PR 3: boot hook, dormant scheduler path, Slint tty2 spawn, and status/events.
 - PR 4: explicit `mister_magik_launch` and `mister_magik_exit_to_menu` commands.
+- External `load_core` compatibility update: while the supervised launcher owns
+  Main's command FIFO, absolute `.mgl`, `.mra`, and `.rbf` requests now enter
+  the same `complete_handoff_to_game()` path as `mister_magik_launch`. The
+  launcher command parser rejects empty, relative, oversized, unsupported, and
+  control-character paths, records accepted and lifecycle-rejected external
+  handoffs, and leaves the stock command reader authoritative whenever the
+  MagiK launcher is inactive.
 - PR 5: defensive invariant diagnostics for unexpected OSD, framebuffer route,
   framebuffer mode, and menu-background work while the launcher owns the UI.
 - PR 9: patch-surface checker and GitHub Actions workflow for host tests,
@@ -302,6 +313,9 @@ Update this section in every PR that adds behavior.
   is not inherited by later core launches. The Menu-path test proves that only
   the exact production latch RBF receives the logical root-level `menu.rbf`
   browser identity; normal and near-matching RBF paths remain unchanged.
+  The command parser tests cover external `load_core` acceptance and rejection,
+  while source invariants prove accepted and lifecycle-rejected diagnostics
+  follow the handoff state gate before entering the supervised real-path handoff.
 - `scripts/check-magik-patch-surface.sh` compares this fork with the upstream
   release baseline and fails if files outside the approved patch surface
   changed, including the narrow structured-handoff allowance for
@@ -564,6 +578,10 @@ Host tests:
 - Handoff command parser tests, including strict structured-plan parser
   acceptance/rejection for schema, mount kind, required paths, and numeric
   fields.
+- External `load_core` parser tests for `.mgl`, `.mra`, and `.rbf` paths,
+  including empty, relative, oversized, unsupported-extension, and control-
+  character rejection; verify accepted commands use the supervised real-path
+  handoff and inactive Main retains its stock command reader.
 - Restart command parser and launcher restart lifecycle tests.
 - Reboot command parser and `LauncherRebooting` lifecycle tests.
 - Crash-policy tests.
@@ -597,3 +615,21 @@ Device tests:
   frame without stock OSD/menu flash before reset.
 - Run the 15-sample supervised reboot Ethernet soak and fail the release if any
   sample does not recover agent, SSH, and `LauncherActive` within timeout.
+
+2026-07-19, MiSTer at `192.168.1.117`, after deploying external `load_core`
+compatibility to `MiSTer_MagiKDev`:
+
+- `scripts/test-magik-state.sh` and the Apple-container ARM build passed.
+- An API-emulated NFC token launched Missile Command from `LauncherActive`.
+  Main recorded `external_load_core_handoff` for the real `.mra` path and
+  re-executed the expected Arcade core.
+- A second emulated token while Missile Command was active launched Black
+  Widow through stock Main command handling, proving game-to-game switching
+  remains intact while the MagiK launcher is inactive.
+- After `load_core menu.rbf` restored the supervised launcher, an emulated
+  Game Boy token produced `/media/fat/.LASTLAUNCH.mgl`; Main recorded the
+  external handoff and entered the Game Boy core.
+- A native `mister_magik_launch` smoke reached the expected Arcade core,
+  confirming the existing MagiK handoff remained intact. Final cleanup
+  restored `LauncherActive`, stopped the temporary token service, left TCP
+  port `7497` closed, and found no live fault-arming files.

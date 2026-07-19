@@ -86,6 +86,33 @@ int main()
 	assert_invalid_plan("schema=1&core_path=NeoGeo&payload_path=/media/fat/test.neo&mount_kind=wrong&mount_index=0&delay_secs=1");
 	assert_invalid_plan("schema=1&core_path=NeoGeo&payload_path=/media/fat/test.neo&mount_kind=mount-image&mount_index=abc&delay_secs=1");
 
-	assert(!magik_launcher_parse_command("load_core /media/fat/foo.rbf", &cmd));
+	assert(magik_launcher_parse_command("load_core /tmp/external-last-launch.mgl", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::ExternalLaunch);
+	assert(!strcmp(cmd.path, "/tmp/external-last-launch.mgl"));
+	assert(!strcmp(magik_launcher_command_type_name(cmd.type), "ExternalLaunch"));
+
+	assert(magik_launcher_parse_command("load_core /media/fat/_Arcade/game.mra", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::ExternalLaunch);
+	assert(magik_launcher_parse_command("load_core /media/fat/_Console/core.RBF", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::ExternalLaunch);
+
+	assert(magik_launcher_parse_command("load_core", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(strstr(cmd.error, "absolute"));
+	assert(magik_launcher_parse_command("load_core relative/game.mgl", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(strstr(cmd.error, "absolute"));
+	assert(magik_launcher_parse_command("load_core /media/fat/game.zip", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(strstr(cmd.error, ".mgl"));
+	assert(magik_launcher_parse_command("load_core /media/fat/game.mgl\r", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(strstr(cmd.error, "control character"));
+
+	char oversized[1200];
+	snprintf(oversized, sizeof(oversized), "load_core /%01080d.mgl", 0);
+	assert(magik_launcher_parse_command(oversized, &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(strstr(cmd.error, "too long"));
 	return 0;
 }

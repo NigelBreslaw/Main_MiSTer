@@ -38,6 +38,7 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	{
 	case MagikLauncherCommandType::None: return "None";
 	case MagikLauncherCommandType::Launch: return "Launch";
+	case MagikLauncherCommandType::ExternalLaunch: return "ExternalLaunch";
 	case MagikLauncherCommandType::LaunchPlan: return "LaunchPlan";
 	case MagikLauncherCommandType::ExitToMenu: return "ExitToMenu";
 	case MagikLauncherCommandType::Suspend: return "Suspend";
@@ -230,6 +231,44 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 	if (!strcmp(line, "mister_magik_direct_reset_no_sync"))
 	{
 		cmd->type = MagikLauncherCommandType::DirectResetNoSync;
+		return true;
+	}
+
+	static const char stock_launch_command[] = "load_core";
+	static const char stock_launch_prefix[] = "load_core ";
+	if (!strcmp(line, stock_launch_command) ||
+	    !strncmp(line, stock_launch_prefix, sizeof(stock_launch_prefix) - 1))
+	{
+		const char *path = line + sizeof(stock_launch_command) - 1;
+		while (*path == ' ' || *path == '\t') path++;
+		if (path[0] != '/')
+		{
+			set_error(cmd, "external load_core path must be absolute");
+			return true;
+		}
+		if (strlen(path) >= sizeof(cmd->path))
+		{
+			set_error(cmd, "external load_core path is too long");
+			return true;
+		}
+		for (const unsigned char *ch = (const unsigned char*)path; *ch; ch++)
+		{
+			if (iscntrl(*ch))
+			{
+				set_error(cmd, "external load_core path contains a control character");
+				return true;
+			}
+		}
+		const char *extension = strrchr(path, '.');
+		if (!extension || (strcasecmp(extension, ".mgl") &&
+		                   strcasecmp(extension, ".mra") &&
+		                   strcasecmp(extension, ".rbf")))
+		{
+			set_error(cmd, "external load_core path must end in .mgl, .mra, or .rbf");
+			return true;
+		}
+		snprintf(cmd->path, sizeof(cmd->path), "%s", path);
+		cmd->type = MagikLauncherCommandType::ExternalLaunch;
 		return true;
 	}
 

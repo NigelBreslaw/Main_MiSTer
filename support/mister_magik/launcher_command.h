@@ -6,6 +6,7 @@ enum class MagikLauncherCommandType
 {
 	None,
 	Launch,
+	ExternalLaunch,
 	LaunchPlan,
 	ExitToMenu,
 	Suspend,

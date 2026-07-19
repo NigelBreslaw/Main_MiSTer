@@ -90,6 +90,27 @@ awk '
   exit 1
 }
 
+awk '
+  /static void complete_handoff_to_game\(/ { in_handoff=1; state_gate=0; accepted=0; rejected=0 }
+  in_handoff && /magik_launcher_accepts_handoff\(s_state\)/ { state_gate=1 }
+  in_handoff && /eventf\("external_load_core_rejected"/ { rejected=state_gate }
+  in_handoff && /eventf\("external_load_core_handoff"/ { accepted=state_gate }
+  in_handoff && /transition\(MagikLauncherEvent::HandoffComplete\)/ {
+    if (!accepted || !rejected) exit 1
+    checked=1
+    in_handoff=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: external load_core diagnostics must follow the supervised handoff state gate" >&2
+  exit 1
+}
+
+grep -q 'complete_handoff_to_game(cmd.path, true)' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: external load_core must identify itself to the supervised game handoff" >&2
+  exit 1
+}
+
 if grep -q 'method=main-reset' "$ROOT/support/mister_magik/launcher.cpp"; then
   echo "ERROR: supervised reboot must not use the direct Main reset path" >&2
   exit 1

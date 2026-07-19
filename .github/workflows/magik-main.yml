@@ -15,5 +15,7 @@ jobs:
           fetch-depth: 0
       - name: Launcher host tests
         run: scripts/test-magik-state.sh
+      - name: Main component contract tests
+        run: python3 tests/test_main_component.py
       - name: Patch surface
         run: scripts/check-magik-patch-surface.sh

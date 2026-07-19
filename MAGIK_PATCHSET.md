@@ -308,6 +308,11 @@ Update this section in every PR that adds behavior.
   `support/arcade/mra_loader.*`.
 - `.github/workflows/magik-main.yml` runs host tests and patch-surface validation
   for fork PRs and pushes to `mister-magik`.
+- `support/mister_magik/main_component.py` defines the attested Main component
+  artifact used by MiSTer MagiK platform promotion. Its identity binds the
+  authoritative repository and branch, exact source revision, and pinned ARM
+  toolchain; create/verify tests cover deterministic identity, malformed
+  receipts, wrong revisions and toolchains, corrupt binaries, and checksums.
 - Real-view Arcade benchmark tooling must write
   `/media/fat/mister-magik/launcher.env`, send
   `mister_magik_restart_launcher`, and verify the child remains

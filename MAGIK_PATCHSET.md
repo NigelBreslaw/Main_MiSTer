@@ -409,6 +409,16 @@ by the generic reader. The status also reports the last launcher operation,
 result, and timestamp. Host tooling must use the authenticated MagiK agent and
 must not infer readiness from the FIFO pathname.
 
+Device smoke on 2026-07-19 passed with the matched development platform:
+
+- `/dev/MiSTer_cmd_reply` existed and `main-status.json` advanced from
+  `ts_boot_ms=71928` to `77081` across a six-second observation.
+- Acknowledged suspend, resume, and launcher restart completed in 99 ms, 60 ms,
+  and 161 ms respectively.
+- Arcade launch returned `ok HandoffStarted` in 72 ms; the dedicated
+  active-core return returned it in 65 ms and reached a fresh `LauncherActive`
+  generation with zero crashes and zero invariant violations.
+
 2026-07-12, MiSTer at `192.168.1.117`, after deploying app commit `c598dada`
 and Main fork commit `2498c03`:
 

@@ -58,6 +58,18 @@ int main()
 	assert(cmd.type == MagikLauncherCommandType::DirectResetNoSync);
 	assert(!strcmp(magik_launcher_command_type_name(cmd.type), "DirectResetNoSync"));
 
+	assert(magik_launcher_parse_command("mister_magik_settings_get_v1", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::SettingsGetV1);
+	assert(magik_launcher_parse_command("mister_magik_settings_set_v1 output=hdmi", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::SettingsSetV1);
+	assert(cmd.runtime_output == MagikRuntimeOutput::Hdmi);
+	assert(magik_launcher_parse_command("mister_magik_settings_set_v1 output=crt-240p60", &cmd));
+	assert(cmd.runtime_output == MagikRuntimeOutput::Crt240p60);
+	assert(magik_launcher_parse_command("mister_magik_settings_set_v1 output=auto", &cmd));
+	assert(cmd.runtime_output == MagikRuntimeOutput::Auto);
+	assert(magik_launcher_parse_command("mister_magik_settings_set_v1 output=pal", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+
 	assert(magik_launcher_parse_command("mister_magik_launch /media/fat/_Arcade/game.mra", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Launch);
 	assert(!strcmp(cmd.path, "/media/fat/_Arcade/game.mra"));

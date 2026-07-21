@@ -19,7 +19,16 @@ enum class MagikLauncherCommandType
 	Reboot,
 	DirectReset,
 	DirectResetNoSync,
+	SettingsGetV1,
+	SettingsSetV1,
 	Invalid,
+};
+
+enum class MagikRuntimeOutput
+{
+	Auto,
+	Hdmi,
+	Crt240p60,
 };
 
 struct MagikStructuredLaunchPlan
@@ -41,6 +50,7 @@ struct MagikLauncherCommand
 	MagikLauncherCommandType type;
 	char path[1024];
 	MagikStructuredLaunchPlan plan;
+	MagikRuntimeOutput runtime_output;
 	char error[160];
 };
 

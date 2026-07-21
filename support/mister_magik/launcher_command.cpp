@@ -28,6 +28,7 @@ void magik_launcher_command_init(MagikLauncherCommand *cmd)
 	if (!cmd) return;
 	cmd->type = MagikLauncherCommandType::None;
 	cmd->path[0] = 0;
+	cmd->runtime_output = MagikRuntimeOutput::Auto;
 	magik_launch_plan_init(&cmd->plan);
 	cmd->error[0] = 0;
 }
@@ -51,6 +52,8 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	case MagikLauncherCommandType::Reboot: return "Reboot";
 	case MagikLauncherCommandType::DirectReset: return "DirectReset";
 	case MagikLauncherCommandType::DirectResetNoSync: return "DirectResetNoSync";
+	case MagikLauncherCommandType::SettingsGetV1: return "SettingsGetV1";
+	case MagikLauncherCommandType::SettingsSetV1: return "SettingsSetV1";
 	case MagikLauncherCommandType::Invalid: return "Invalid";
 	}
 	return "Unknown";
@@ -237,6 +240,26 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 	if (!strcmp(line, "mister_magik_direct_reset_no_sync"))
 	{
 		cmd->type = MagikLauncherCommandType::DirectResetNoSync;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_settings_get_v1"))
+	{
+		cmd->type = MagikLauncherCommandType::SettingsGetV1;
+		return true;
+	}
+	static const char settings_prefix[] = "mister_magik_settings_set_v1 output=";
+	if (!strncmp(line, settings_prefix, sizeof(settings_prefix) - 1))
+	{
+		const char *value = line + sizeof(settings_prefix) - 1;
+		if (!strcmp(value, "auto")) cmd->runtime_output = MagikRuntimeOutput::Auto;
+		else if (!strcmp(value, "hdmi")) cmd->runtime_output = MagikRuntimeOutput::Hdmi;
+		else if (!strcmp(value, "crt-240p60")) cmd->runtime_output = MagikRuntimeOutput::Crt240p60;
+		else
+		{
+			set_error(cmd, "runtime output must be auto, hdmi, or crt-240p60");
+			return true;
+		}
+		cmd->type = MagikLauncherCommandType::SettingsSetV1;
 		return true;
 	}
 

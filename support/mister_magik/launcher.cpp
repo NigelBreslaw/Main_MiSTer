@@ -32,6 +32,7 @@
 #include "user_io.h"
 #include "osd.h"
 #include "video.h"
+#include "cfg.h"
 
 extern int video_magik_route_black();
 
@@ -42,6 +43,13 @@ static const char s_status_path[] = "/tmp/mister-magik/main-status.json";
 static const char s_events_path[] = "/tmp/mister-magik/events.jsonl";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
+static int s_runtime_output_override = -1;
+
+static const char *resolved_runtime_output()
+{
+	int direct = s_runtime_output_override >= 0 ? s_runtime_output_override : (cfg.direct_video ? 1 : 0);
+	return direct ? "crt-240p60" : "hdmi";
+}
 static const char *layout_path(const char *relative)
 {
 	static char slots[8][PATH_MAX];
@@ -826,6 +834,28 @@ static void process_command_line(const char *line)
 		reply_commandf("error %s", cmd.error);
 		return;
 	}
+	if (cmd.type == MagikLauncherCommandType::SettingsGetV1)
+	{
+		reply_commandf("ok SettingsV1 schema=1 output=%s", resolved_runtime_output());
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::SettingsSetV1)
+	{
+		if (s_state != MagikLauncherState::LauncherActive)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		switch (cmd.runtime_output)
+		{
+		case MagikRuntimeOutput::Auto: s_runtime_output_override = -1; break;
+		case MagikRuntimeOutput::Hdmi: s_runtime_output_override = 0; break;
+		case MagikRuntimeOutput::Crt240p60: s_runtime_output_override = 1; break;
+		}
+		eventf("runtime_settings_changed", "schema=1 output=%s", resolved_runtime_output());
+		reply_commandf("ok SettingsV1 schema=1 output=%s", resolved_runtime_output());
+		return;
+	}
 	if (cmd.type == MagikLauncherCommandType::Launch)
 	{
 		if (!magik_launcher_accepts_handoff(s_state))
@@ -1067,6 +1097,7 @@ static bool write_launcher_script(const char *path)
 	        "export LC_ALL=en_US.UTF-8\n"
 	        "export HOME=/root\n"
 	        "export MISTER_MAGIK_PARENT=main-mister\n"
+	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
 	        "export MISTER_MAGIK_RETURN_TO_LAUNCHER=%d\n"
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
@@ -1087,6 +1118,7 @@ static bool write_launcher_script(const char *path)
 	        "fi\n"
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
+	        resolved_runtime_output(),
 	        return_spawn ? 1 : 0,
 	        layout_path("launcher.env"),
 	        layout_path("launcher.env"),

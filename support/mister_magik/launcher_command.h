@@ -59,3 +59,4 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd);
 bool magik_launcher_is_plan_arg(const char *arg);
 bool magik_launcher_parse_plan_arg(const char *arg, MagikStructuredLaunchPlan *plan);
 const char *magik_launcher_command_type_name(MagikLauncherCommandType type);
+const char *magik_resolved_output_name(bool direct_video, bool menu_pal, bool forced_scandoubler);

@@ -240,11 +240,13 @@ Update this section in every PR that adds behavior.
   not compatible with old Rust launchers that still materialize virtual `.mgl`
   descriptors; deploy `MiSTer_MagiK` and `mister-magik-fb` together.
 - Runtime settings v1 exposes Main's resolved launcher output as `hdmi` or
-  `crt-240p60`, including the result of `direct_video=2` known-DAC detection.
+  `crt-240p60`, `crt-288p50`, `crt-480p60`, or `crt-576p50`, including the
+  result of `direct_video=2` known-DAC detection and the selected PAL/scandoubler mode.
   The typed `mister_magik_settings_get_v1` and
-  `mister_magik_settings_set_v1 output=<auto|hdmi|crt-240p60>` commands use the
-  existing acknowledged FIFO and never edit `MiSTer.ini`. Output is the first
-  namespace; future input settings must use separate typed fields.
+  `mister_magik_settings_set_v1 output=<auto|hdmi|crt-240p60>` command retains the
+  existing acknowledged FIFO but rejects runtime output changes as
+  `restart-required`; it never edits `MiSTer.ini`. Output is the first namespace;
+  future input settings must use separate typed fields.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's
   normal `user_io_poll()` dormant while Slint owns display/input, but Main still
   has to know the hardware memory configuration before launching a core. Both

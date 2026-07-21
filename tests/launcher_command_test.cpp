@@ -17,6 +17,11 @@ static void assert_invalid_plan(const char *encoded)
 
 int main()
 {
+	assert(!strcmp(magik_resolved_output_name(false, false, false), "hdmi"));
+	assert(!strcmp(magik_resolved_output_name(true, false, false), "crt-240p60"));
+	assert(!strcmp(magik_resolved_output_name(true, true, false), "crt-288p50"));
+	assert(!strcmp(magik_resolved_output_name(true, false, true), "crt-480p60"));
+	assert(!strcmp(magik_resolved_output_name(true, true, true), "crt-576p50"));
 	MagikLauncherCommand cmd;
 	assert(magik_launcher_parse_command("mister_magik_exit_to_menu", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::ExitToMenu);

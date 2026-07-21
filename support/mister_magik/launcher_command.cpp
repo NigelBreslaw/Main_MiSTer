@@ -33,6 +33,13 @@ void magik_launcher_command_init(MagikLauncherCommand *cmd)
 	cmd->error[0] = 0;
 }
 
+const char *magik_resolved_output_name(bool direct_video, bool menu_pal, bool forced_scandoubler)
+{
+	if (!direct_video) return "hdmi";
+	if (forced_scandoubler) return menu_pal ? "crt-576p50" : "crt-480p60";
+	return menu_pal ? "crt-288p50" : "crt-240p60";
+}
+
 const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 {
 	switch (type)

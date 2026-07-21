@@ -43,12 +43,9 @@ static const char s_status_path[] = "/tmp/mister-magik/main-status.json";
 static const char s_events_path[] = "/tmp/mister-magik/events.jsonl";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
-static int s_runtime_output_override = -1;
-
 static const char *resolved_runtime_output()
 {
-	int direct = s_runtime_output_override >= 0 ? s_runtime_output_override : (cfg.direct_video ? 1 : 0);
-	return direct ? "crt-240p60" : "hdmi";
+	return magik_resolved_output_name(cfg.direct_video, cfg.menu_pal, cfg.forced_scandoubler);
 }
 static const char *layout_path(const char *relative)
 {
@@ -846,14 +843,8 @@ static void process_command_line(const char *line)
 			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
 			return;
 		}
-		switch (cmd.runtime_output)
-		{
-		case MagikRuntimeOutput::Auto: s_runtime_output_override = -1; break;
-		case MagikRuntimeOutput::Hdmi: s_runtime_output_override = 0; break;
-		case MagikRuntimeOutput::Crt240p60: s_runtime_output_override = 1; break;
-		}
-		eventf("runtime_settings_changed", "schema=1 output=%s", resolved_runtime_output());
-		reply_commandf("ok SettingsV1 schema=1 output=%s", resolved_runtime_output());
+		eventf("runtime_settings_rejected", "schema=1 setting=output reason=restart-required");
+		reply_commandf("rejected restart-required");
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Launch)

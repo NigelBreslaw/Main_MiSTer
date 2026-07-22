@@ -706,7 +706,6 @@ static void restart_launcher(void)
 	s_restart_count++;
 	s_last_restart_error[0] = 0;
 	MagikLauncherRestartAction action = magik_launcher_restart_action(s_state);
-	if (magik_launcher_restart_resets_tty(action)) reset_launcher_tty();
 	switch (action)
 	{
 	case MagikLauncherRestartAction::ResumeSuspended:
@@ -1262,6 +1261,7 @@ static bool write_launcher_script(const char *path)
 	        "export HOME=/root\n"
 	        "export MISTER_MAGIK_PARENT=main-mister\n"
 	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
+	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
 	        "export MISTER_MAGIK_RETURN_TO_LAUNCHER=%d\n"
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
@@ -1283,6 +1283,7 @@ static bool write_launcher_script(const char *path)
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
 	        resolved_runtime_output(),
+	        configured_display_mode(),
 	        return_spawn ? 1 : 0,
 	        layout_path("launcher.env"),
 	        layout_path("launcher.env"),

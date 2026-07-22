@@ -247,6 +247,15 @@ Update this section in every PR that adds behavior.
   existing acknowledged FIFO but rejects runtime output changes as
   `restart-required`; it never edits `MiSTer.ini`. Output is the first namespace;
   future input settings must use separate typed fields.
+- Runtime display transactions v1 add typed get/apply/confirm/cancel commands
+  for the qualified HDMI modes, automatic HDMI-DAC detection, and the four
+  standard CRT/VGA modes. Apply suspends Slint, forces Main's video mode, and
+  restarts only the launcher. Main starts a ten-second deadline when the new
+  launcher queries the pending state, retains a bounded no-launcher fallback,
+  and restores the in-memory working mode on cancel or timeout. Confirmation
+  delegates comment-preserving atomic `MiSTer.ini` persistence to the matching
+  `mister-magik-fb`; therefore a crash or power loss before confirmation keeps
+  the previously persisted output.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's
   normal `user_io_poll()` dormant while Slint owns display/input, but Main still
   has to know the hardware memory configuration before launching a core. Both

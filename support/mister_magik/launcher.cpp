@@ -141,6 +141,33 @@ static char s_last_crash_kind[64] = "";
 static char s_last_restart_error[256] = "";
 static char s_last_spawn_error[256] = "";
 
+struct DisplayTransaction
+{
+	bool pending;
+	MagikRuntimeOutput requested;
+	int old_direct_video;
+	int old_menu_pal;
+	int old_forced_scandoubler;
+	char old_video_conf[1024];
+	unsigned long deadline_ms;
+	unsigned long fallback_deadline_ms;
+};
+
+static DisplayTransaction s_display_transaction = {};
+
+static const char *configured_display_mode()
+{
+	if (cfg.direct_video == 2) return "auto";
+	if (cfg.direct_video) return magik_resolved_output_name(true, cfg.menu_pal, cfg.forced_scandoubler);
+	if (!strcmp(cfg.video_conf, "0")) return "hdmi-1280x720p60";
+	if (!strcmp(cfg.video_conf, "10")) return "hdmi-1366x768p60";
+	if (!strcmp(cfg.video_conf, "8")) return "hdmi-1920x1080p60";
+	if (!strcmp(cfg.video_conf, "1920,1200,60")) return "hdmi-1920x1200p60";
+	if (!strcmp(cfg.video_conf, "13")) return "hdmi-2048x1536p60";
+	if (!strcmp(cfg.video_conf, "14")) return "hdmi-2560x1440p60";
+	return "custom";
+}
+
 static void clear_input_policy_marker(void)
 {
 	unlink(s_input_policy_path);
@@ -817,6 +844,23 @@ static void video_reinit_diagnostic(void)
 	eventf("display_diag_reinit_done", "state=%s", magik_launcher_state_name(s_state));
 }
 
+static bool restore_display_transaction()
+{
+	if (!s_display_transaction.pending) return false;
+	if (s_state == MagikLauncherState::LauncherActive) suspend_launcher();
+	video_fb_enable(0);
+	cfg.direct_video = s_display_transaction.old_direct_video;
+	cfg.menu_pal = s_display_transaction.old_menu_pal;
+	cfg.forced_scandoubler = s_display_transaction.old_forced_scandoubler;
+	snprintf(cfg.video_conf, sizeof(cfg.video_conf), "%s", s_display_transaction.old_video_conf);
+	s_display_transaction.pending = false;
+	s_display_transaction.deadline_ms = 0;
+	s_display_transaction.fallback_deadline_ms = 0;
+	if (!video_apply_runtime_output(configured_display_mode())) return false;
+	restart_launcher();
+	return true;
+}
+
 static void process_command_line(const char *line)
 {
 	MagikLauncherCommand cmd;
@@ -845,6 +889,73 @@ static void process_command_line(const char *line)
 		}
 		eventf("runtime_settings_rejected", "schema=1 setting=output reason=restart-required");
 		reply_commandf("rejected restart-required");
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::DisplayGetV1)
+	{
+		if (s_display_transaction.pending && !s_display_transaction.deadline_ms)
+			s_display_transaction.deadline_ms = GetTimer(0) + 10000;
+		unsigned long remaining = 0;
+		if (s_display_transaction.pending && s_display_transaction.deadline_ms)
+		{
+			unsigned long now = GetTimer(0);
+			remaining = now < s_display_transaction.deadline_ms ? (s_display_transaction.deadline_ms - now + 999) / 1000 : 0;
+		}
+		reply_commandf("ok DisplayV1 schema=1 active=%s pending=%s remaining=%lu",
+		                 configured_display_mode(),
+		                 s_display_transaction.pending ? magik_runtime_output_name(s_display_transaction.requested) : "none",
+		                 remaining);
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::DisplayApplyV1)
+	{
+		if (s_state != MagikLauncherState::LauncherActive || s_display_transaction.pending)
+		{
+			reply_commandf("rejected %s", s_display_transaction.pending ? "transaction-pending" : magik_launcher_state_name(s_state));
+			return;
+		}
+		s_display_transaction.pending = true;
+		s_display_transaction.requested = cmd.runtime_output;
+		s_display_transaction.old_direct_video = cfg.direct_video;
+		s_display_transaction.old_menu_pal = cfg.menu_pal;
+		s_display_transaction.old_forced_scandoubler = cfg.forced_scandoubler;
+		snprintf(s_display_transaction.old_video_conf, sizeof(s_display_transaction.old_video_conf), "%s", cfg.video_conf);
+		s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
+		mister_magik_command_reply("ok DisplayRestarting");
+		suspend_launcher();
+		video_fb_enable(0);
+		if (!video_apply_runtime_output(magik_runtime_output_name(cmd.runtime_output)))
+		{
+			(void)restore_display_transaction();
+			return;
+		}
+		restart_launcher();
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::DisplayConfirmV1)
+	{
+		if (!s_display_transaction.pending)
+		{
+			mister_magik_command_reply("rejected no-display-transaction");
+			return;
+		}
+		char command[PATH_MAX + 256];
+		snprintf(command, sizeof(command), "%s display-persist %s", layout_path("mister-magik-fb"), magik_runtime_output_name(s_display_transaction.requested));
+		if (system(command) != 0)
+		{
+			mister_magik_command_reply("error display-persist-failed");
+			return;
+		}
+		s_display_transaction.pending = false;
+		s_display_transaction.deadline_ms = 0;
+		s_display_transaction.fallback_deadline_ms = 0;
+		mister_magik_command_reply("ok DisplayConfirmed");
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::DisplayCancelV1)
+	{
+		mister_magik_command_reply("ok DisplayRollingBack");
+		(void)restore_display_transaction();
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::Launch)
@@ -1342,6 +1453,13 @@ void mister_magik_launcher_poll(void)
 	if (!mister_magik_launcher_configured()) return;
 	static unsigned long last_heartbeat_ms;
 	unsigned long now_ms = GetTimer(0);
+	if (s_display_transaction.pending &&
+	    ((s_display_transaction.deadline_ms && now_ms >= s_display_transaction.deadline_ms) ||
+	     (s_display_transaction.fallback_deadline_ms && now_ms >= s_display_transaction.fallback_deadline_ms)))
+	{
+		eventf("display_transaction_timeout", "mode=%s", magik_runtime_output_name(s_display_transaction.requested));
+		(void)restore_display_transaction();
+	}
 	if (!last_heartbeat_ms || now_ms - last_heartbeat_ms >= s_heartbeat_ms)
 	{
 		last_heartbeat_ms = now_ms;

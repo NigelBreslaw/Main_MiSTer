@@ -61,9 +61,48 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	case MagikLauncherCommandType::DirectResetNoSync: return "DirectResetNoSync";
 	case MagikLauncherCommandType::SettingsGetV1: return "SettingsGetV1";
 	case MagikLauncherCommandType::SettingsSetV1: return "SettingsSetV1";
+	case MagikLauncherCommandType::DisplayGetV1: return "DisplayGetV1";
+	case MagikLauncherCommandType::DisplayApplyV1: return "DisplayApplyV1";
+	case MagikLauncherCommandType::DisplayConfirmV1: return "DisplayConfirmV1";
+	case MagikLauncherCommandType::DisplayCancelV1: return "DisplayCancelV1";
 	case MagikLauncherCommandType::Invalid: return "Invalid";
 	}
 	return "Unknown";
+}
+
+const char *magik_runtime_output_name(MagikRuntimeOutput output)
+{
+	switch (output)
+	{
+	case MagikRuntimeOutput::Auto: return "auto";
+	case MagikRuntimeOutput::Hdmi: return "hdmi";
+	case MagikRuntimeOutput::Crt240p60: return "crt-240p60";
+	case MagikRuntimeOutput::Crt288p50: return "crt-288p50";
+	case MagikRuntimeOutput::Crt480p60: return "crt-480p60";
+	case MagikRuntimeOutput::Crt576p50: return "crt-576p50";
+	case MagikRuntimeOutput::Hdmi720p60: return "hdmi-1280x720p60";
+	case MagikRuntimeOutput::Hdmi768p60: return "hdmi-1366x768p60";
+	case MagikRuntimeOutput::Hdmi1080p60: return "hdmi-1920x1080p60";
+	case MagikRuntimeOutput::Hdmi1200p60: return "hdmi-1920x1200p60";
+	case MagikRuntimeOutput::Hdmi1536p60: return "hdmi-2048x1536p60";
+	case MagikRuntimeOutput::Hdmi1440p60: return "hdmi-2560x1440p60";
+	}
+	return "unknown";
+}
+
+static bool parse_runtime_output(const char *value, MagikRuntimeOutput *output)
+{
+	if (!value || !output) return false;
+	for (int raw = (int)MagikRuntimeOutput::Auto; raw <= (int)MagikRuntimeOutput::Hdmi1440p60; raw++)
+	{
+		MagikRuntimeOutput candidate = (MagikRuntimeOutput)raw;
+		if (!strcmp(value, magik_runtime_output_name(candidate)))
+		{
+			*output = candidate;
+			return true;
+		}
+	}
+	return false;
 }
 
 static int hex_value(char ch)
@@ -267,6 +306,32 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 			return true;
 		}
 		cmd->type = MagikLauncherCommandType::SettingsSetV1;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_display_get_v1"))
+	{
+		cmd->type = MagikLauncherCommandType::DisplayGetV1;
+		return true;
+	}
+	static const char display_prefix[] = "mister_magik_display_apply_v1 mode=";
+	if (!strncmp(line, display_prefix, sizeof(display_prefix) - 1))
+	{
+		if (!parse_runtime_output(line + sizeof(display_prefix) - 1, &cmd->runtime_output))
+		{
+			set_error(cmd, "unsupported display mode");
+			return true;
+		}
+		cmd->type = MagikLauncherCommandType::DisplayApplyV1;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_display_confirm_v1"))
+	{
+		cmd->type = MagikLauncherCommandType::DisplayConfirmV1;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_display_cancel_v1"))
+	{
+		cmd->type = MagikLauncherCommandType::DisplayCancelV1;
 		return true;
 	}
 

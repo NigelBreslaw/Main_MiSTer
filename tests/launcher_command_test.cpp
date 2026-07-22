@@ -23,6 +23,7 @@ int main()
 	assert(!strcmp(magik_resolved_output_name(true, false, true), "crt-480p60"));
 	assert(!strcmp(magik_resolved_output_name(true, true, true), "crt-576p50"));
 	MagikLauncherCommand cmd;
+	char line[2048];
 	assert(magik_launcher_parse_command("mister_magik_exit_to_menu", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::ExitToMenu);
 	assert(magik_launcher_parse_command("mister_magik_return_to_launcher", &cmd));
@@ -75,6 +76,27 @@ int main()
 	assert(magik_launcher_parse_command("mister_magik_settings_set_v1 output=pal", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Invalid);
 
+	assert(magik_launcher_parse_command("mister_magik_display_get_v1", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::DisplayGetV1);
+	const char *display_modes[] = {
+		"auto", "hdmi-1280x720p60", "hdmi-1366x768p60", "hdmi-1920x1080p60",
+		"hdmi-1920x1200p60", "hdmi-2048x1536p60", "hdmi-2560x1440p60",
+		"crt-240p60", "crt-288p50", "crt-480p60", "crt-576p50"
+	};
+	for (const char *mode : display_modes)
+	{
+		snprintf(line, sizeof(line), "mister_magik_display_apply_v1 mode=%s", mode);
+		assert(magik_launcher_parse_command(line, &cmd));
+		assert(cmd.type == MagikLauncherCommandType::DisplayApplyV1);
+		assert(!strcmp(magik_runtime_output_name(cmd.runtime_output), mode));
+	}
+	assert(magik_launcher_parse_command("mister_magik_display_confirm_v1", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::DisplayConfirmV1);
+	assert(magik_launcher_parse_command("mister_magik_display_cancel_v1", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::DisplayCancelV1);
+	assert(magik_launcher_parse_command("mister_magik_display_apply_v1 mode=unsafe", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+
 	assert(magik_launcher_parse_command("mister_magik_launch /media/fat/_Arcade/game.mra", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Launch);
 	assert(!strcmp(cmd.path, "/media/fat/_Arcade/game.mra"));
@@ -83,7 +105,6 @@ int main()
 	assert(cmd.type == MagikLauncherCommandType::Invalid);
 	assert(strstr(cmd.error, "absolute"));
 
-	char line[2048];
 	snprintf(line, sizeof(line), "mister_magik_launch_plan_v1 %s", valid_plan);
 	assert(magik_launcher_parse_command(line, &cmd));
 	assert(cmd.type == MagikLauncherCommandType::LaunchPlan);

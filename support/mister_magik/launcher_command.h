@@ -21,6 +21,10 @@ enum class MagikLauncherCommandType
 	DirectResetNoSync,
 	SettingsGetV1,
 	SettingsSetV1,
+	DisplayGetV1,
+	DisplayApplyV1,
+	DisplayConfirmV1,
+	DisplayCancelV1,
 	Invalid,
 };
 
@@ -29,6 +33,15 @@ enum class MagikRuntimeOutput
 	Auto,
 	Hdmi,
 	Crt240p60,
+	Crt288p50,
+	Crt480p60,
+	Crt576p50,
+	Hdmi720p60,
+	Hdmi768p60,
+	Hdmi1080p60,
+	Hdmi1200p60,
+	Hdmi1536p60,
+	Hdmi1440p60,
 };
 
 struct MagikStructuredLaunchPlan
@@ -60,3 +73,4 @@ bool magik_launcher_is_plan_arg(const char *arg);
 bool magik_launcher_parse_plan_arg(const char *arg, MagikStructuredLaunchPlan *plan);
 const char *magik_launcher_command_type_name(MagikLauncherCommandType type);
 const char *magik_resolved_output_name(bool direct_video, bool menu_pal, bool forced_scandoubler);
+const char *magik_runtime_output_name(MagikRuntimeOutput output);

@@ -2757,6 +2757,49 @@ void video_reinit()
 	return;
 }
 
+bool video_apply_runtime_output(const char *mode)
+{
+	if (!mode || !mode[0]) return false;
+	if (!strcmp(mode, "auto"))
+	{
+		cfg.direct_video = 2;
+	}
+	else if (!strcmp(mode, "crt-240p60") || !strcmp(mode, "crt-288p50") ||
+	         !strcmp(mode, "crt-480p60") || !strcmp(mode, "crt-576p50"))
+	{
+		cfg.direct_video = 1;
+		cfg.menu_pal = strstr(mode, "288") || strstr(mode, "576");
+		cfg.forced_scandoubler = strstr(mode, "480") || strstr(mode, "576");
+	}
+	else
+	{
+		const char *value = 0;
+		if (!strcmp(mode, "hdmi") || !strcmp(mode, "custom")) value = cfg.video_conf;
+		else if (!strcmp(mode, "hdmi-1280x720p60")) value = "0";
+		else if (!strcmp(mode, "hdmi-1366x768p60")) value = "10";
+		else if (!strcmp(mode, "hdmi-1920x1080p60")) value = "8";
+		else if (!strcmp(mode, "hdmi-1920x1200p60")) value = "1920,1200,60";
+		else if (!strcmp(mode, "hdmi-2048x1536p60")) value = "13";
+		else if (!strcmp(mode, "hdmi-2560x1440p60")) value = "14";
+		else return false;
+		cfg.direct_video = 0;
+		if (value != cfg.video_conf)
+			snprintf(cfg.video_conf, sizeof(cfg.video_conf), "%s", value);
+	}
+
+	// Unlike video_reinit(), a settings transaction must not skip an unchanged
+	// EDID: the requested mode itself changed.
+	hdmi_config_init();
+	hdmi_invalidate_mode_cache();
+	hdmi_config_set_hdr();
+	video_mode_load(true);
+	video_set_mode(&v_def, 0);
+	user_io_send_buttons(1);
+	video_mode_adjust(true);
+	video_menu_bg(-1);
+	return true;
+}
+
 void video_hdmi_power(int on)
 {
 	// ADV7513 power-down control: 0x41[6] = power down.

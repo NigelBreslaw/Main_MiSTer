@@ -2789,7 +2789,11 @@ bool video_apply_runtime_output(const char *mode)
 	}
 
 	// Unlike video_reinit(), a settings transaction must not skip an unchanged
-	// EDID: the requested mode itself changed.
+	// EDID: the requested mode itself changed. Refresh the sink before resetting
+	// the transmitter, matching the reinitialization path that recovers a link
+	// after boot. Without this, the FPGA geometry changes while HDMI can remain
+	// unsignalled after leaving direct video.
+	read_edid(true);
 	hdmi_config_init();
 	hdmi_invalidate_mode_cache();
 	hdmi_config_set_hdr();

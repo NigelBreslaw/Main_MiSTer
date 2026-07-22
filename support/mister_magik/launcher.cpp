@@ -853,6 +853,7 @@ static void video_reinit_diagnostic(void)
 static bool restore_display_transaction(const char *return_error = NULL)
 {
 	if (!s_display_transaction.pending) return false;
+	bool return_to_settings = magik_display_should_return_to_settings(s_display_transaction.confirm_ui);
 	if (s_display_transaction.persist_pid > 0)
 	{
 		kill(s_display_transaction.persist_pid, SIGTERM);
@@ -872,7 +873,7 @@ static bool restore_display_transaction(const char *return_error = NULL)
 	if (!video_apply_runtime_output(configured_display_mode()))
 	{
 		snprintf(s_display_return_error, sizeof(s_display_return_error), "rollback-video-failed");
-		s_display_return_settings = true;
+		s_display_return_settings = return_to_settings;
 		restart_launcher();
 		return false;
 	}
@@ -880,7 +881,7 @@ static bool restore_display_transaction(const char *return_error = NULL)
 		snprintf(s_display_return_error, sizeof(s_display_return_error), "%s", return_error);
 	else
 		s_display_return_error[0] = 0;
-	s_display_return_settings = true;
+	s_display_return_settings = return_to_settings;
 	restart_launcher();
 	return true;
 }

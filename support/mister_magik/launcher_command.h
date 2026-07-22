@@ -75,3 +75,4 @@ bool magik_launcher_parse_plan_arg(const char *arg, MagikStructuredLaunchPlan *p
 const char *magik_launcher_command_type_name(MagikLauncherCommandType type);
 const char *magik_resolved_output_name(bool direct_video, bool menu_pal, bool forced_scandoubler);
 const char *magik_runtime_output_name(MagikRuntimeOutput output);
+bool magik_display_should_return_to_settings(bool confirm_ui);

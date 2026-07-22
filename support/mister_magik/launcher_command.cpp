@@ -91,6 +91,11 @@ const char *magik_runtime_output_name(MagikRuntimeOutput output)
 	return "unknown";
 }
 
+bool magik_display_should_return_to_settings(bool confirm_ui)
+{
+	return confirm_ui;
+}
+
 static bool parse_runtime_output(const char *value, MagikRuntimeOutput *output)
 {
 	if (!value || !output) return false;

@@ -12,6 +12,8 @@ static void assert_invalid_plan(const char *encoded)
 	snprintf(line, sizeof(line), "mister_magik_launch_plan_v1 %s", encoded);
 	assert(magik_launcher_parse_command(line, &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(magik_display_should_return_to_settings(true));
+	assert(!magik_display_should_return_to_settings(false));
 	assert(strstr(cmd.error, "structured launch plan"));
 }
 

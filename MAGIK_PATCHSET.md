@@ -267,7 +267,9 @@ Update this section in every PR that adds behavior.
   the Settings confirmation dialog; UI-originated `display_apply_v1` exports
   `1` and retains the countdown. Main re-exports these transaction-owned
   values after optional `launcher.env` loading so local overrides cannot cross
-  the UI/headless boundary. Older launchers ignore the new environment value;
+  the UI/headless boundary. Timeout, cancellation, and rollback failure also
+  preserve this route: errors remain in the typed display reply, while only
+  UI-originated transactions request a Settings/error return. Older launchers ignore the new environment value;
   older Main builds reject the new typed command rather than silently applying
   it through the UI route.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's

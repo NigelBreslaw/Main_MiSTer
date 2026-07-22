@@ -258,6 +258,8 @@ Update this section in every PR that adds behavior.
   mode provisional for retry or cancellation; rollback terminates any active
   persistence child and publishes a one-shot Settings return intent. A crash or
   power loss before successful confirmation keeps the previously persisted output.
+  The suspended launcher restart resets its TTY before respawn so a runtime mode
+  change cannot retain the previous scan-out geometry.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's
   normal `user_io_poll()` dormant while Slint owns display/input, but Main still
   has to know the hardware memory configuration before launching a core. Both

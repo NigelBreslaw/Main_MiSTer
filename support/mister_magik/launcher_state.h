@@ -47,6 +47,7 @@ bool magik_launcher_accepts_handoff(MagikLauncherState state);
 bool magik_launcher_polls_commands(MagikLauncherState state);
 bool magik_launcher_idle_waits(MagikLauncherState state);
 MagikLauncherRestartAction magik_launcher_restart_action(MagikLauncherState state);
+bool magik_launcher_restart_resets_tty(MagikLauncherRestartAction action);
 bool magik_launcher_transition(
     MagikLauncherState current,
     MagikLauncherEvent event,

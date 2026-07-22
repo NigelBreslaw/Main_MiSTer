@@ -72,6 +72,11 @@ MagikLauncherRestartAction magik_launcher_restart_action(MagikLauncherState stat
 	}
 }
 
+bool magik_launcher_restart_resets_tty(MagikLauncherRestartAction action)
+{
+	return action == MagikLauncherRestartAction::ResumeSuspended;
+}
+
 bool magik_launcher_accepts_handoff(MagikLauncherState state)
 {
 	return state == MagikLauncherState::LauncherActive;

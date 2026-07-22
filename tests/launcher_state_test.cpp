@@ -65,6 +65,9 @@ int main()
 	assert(magik_launcher_polls_commands(suspended));
 	assert(magik_launcher_idle_waits(suspended));
 	assert(magik_launcher_restart_action(suspended) == MagikLauncherRestartAction::ResumeSuspended);
+	assert(magik_launcher_restart_resets_tty(MagikLauncherRestartAction::ResumeSuspended));
+	assert(!magik_launcher_restart_resets_tty(MagikLauncherRestartAction::RestartActive));
+	assert(!magik_launcher_restart_resets_tty(MagikLauncherRestartAction::RespawnCrashed));
 	MagikLauncherState restarting = step(suspended, MagikLauncherEvent::ResumeRequested);
 	assert(restarting == MagikLauncherState::EnteringLauncher);
 	assert(step(restarting, MagikLauncherEvent::ChildSpawned) == MagikLauncherState::LauncherActive);

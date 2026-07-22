@@ -705,7 +705,9 @@ static void restart_launcher(void)
 {
 	s_restart_count++;
 	s_last_restart_error[0] = 0;
-	switch (magik_launcher_restart_action(s_state))
+	MagikLauncherRestartAction action = magik_launcher_restart_action(s_state);
+	if (magik_launcher_restart_resets_tty(action)) reset_launcher_tty();
+	switch (action)
 	{
 	case MagikLauncherRestartAction::ResumeSuspended:
 		transition(MagikLauncherEvent::ResumeRequested);

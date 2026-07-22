@@ -89,12 +89,18 @@ int main()
 		assert(magik_launcher_parse_command(line, &cmd));
 		assert(cmd.type == MagikLauncherCommandType::DisplayApplyV1);
 		assert(!strcmp(magik_runtime_output_name(cmd.runtime_output), mode));
+		snprintf(line, sizeof(line), "mister_magik_display_apply_headless_v1 mode=%s", mode);
+		assert(magik_launcher_parse_command(line, &cmd));
+		assert(cmd.type == MagikLauncherCommandType::DisplayApplyHeadlessV1);
+		assert(!strcmp(magik_runtime_output_name(cmd.runtime_output), mode));
 	}
 	assert(magik_launcher_parse_command("mister_magik_display_confirm_v1", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::DisplayConfirmV1);
 	assert(magik_launcher_parse_command("mister_magik_display_cancel_v1", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::DisplayCancelV1);
 	assert(magik_launcher_parse_command("mister_magik_display_apply_v1 mode=unsafe", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::Invalid);
+	assert(magik_launcher_parse_command("mister_magik_display_apply_headless_v1 mode=unsafe", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::Invalid);
 
 	assert(magik_launcher_parse_command("mister_magik_launch /media/fat/_Arcade/game.mra", &cmd));

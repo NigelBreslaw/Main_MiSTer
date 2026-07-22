@@ -117,6 +117,23 @@ grep -q 'complete_handoff_to_game(cmd.path, true)' "$ROOT/support/mister_magik/l
   exit 1
 }
 
+awk '
+  /static bool write_launcher_script\(/ { in_script=1; sourced=0; settings=0; display=0; confirm=0 }
+  in_script && /"  \. / { sourced=1 }
+  in_script && /MISTER_MAGIK_RUNTIME_SETTINGS_V1/ { settings=sourced }
+  in_script && /MISTER_MAGIK_RUNTIME_DISPLAY_V1/ { display=sourced }
+  in_script && /MISTER_MAGIK_DISPLAY_CONFIRM_UI/ { confirm=sourced }
+  in_script && /fclose\(f\)/ {
+    if (!settings || !display || !confirm) exit 1
+    checked=1
+    in_script=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: launcher.env must not override Main-owned runtime display contracts" >&2
+  exit 1
+}
+
 if grep -q 'method=main-reset' "$ROOT/support/mister_magik/launcher.cpp"; then
   echo "ERROR: supervised reboot must not use the direct Main reset path" >&2
   exit 1

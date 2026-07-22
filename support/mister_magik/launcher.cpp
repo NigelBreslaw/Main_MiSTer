@@ -153,6 +153,7 @@ struct DisplayTransaction
 	unsigned long fallback_deadline_ms;
 	pid_t persist_pid;
 	char persist_error[64];
+	bool confirm_ui;
 };
 
 static DisplayTransaction s_display_transaction = {};
@@ -966,7 +967,8 @@ static void process_command_line(const char *line)
 		s_display_return_error[0] = 0;
 		return;
 	}
-	if (cmd.type == MagikLauncherCommandType::DisplayApplyV1)
+	if (cmd.type == MagikLauncherCommandType::DisplayApplyV1 ||
+	    cmd.type == MagikLauncherCommandType::DisplayApplyHeadlessV1)
 	{
 		if (s_state != MagikLauncherState::LauncherActive || s_display_transaction.pending)
 		{
@@ -982,6 +984,7 @@ static void process_command_line(const char *line)
 		s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
 		s_display_transaction.persist_pid = 0;
 		s_display_transaction.persist_error[0] = 0;
+		s_display_transaction.confirm_ui = cmd.type == MagikLauncherCommandType::DisplayApplyV1;
 		mister_magik_command_reply("ok DisplayRestarting");
 		suspend_launcher();
 		video_fb_enable(0);
@@ -1260,12 +1263,13 @@ static bool write_launcher_script(const char *path)
 	        "export LC_ALL=en_US.UTF-8\n"
 	        "export HOME=/root\n"
 	        "export MISTER_MAGIK_PARENT=main-mister\n"
-	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
-	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
 	        "export MISTER_MAGIK_RETURN_TO_LAUNCHER=%d\n"
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
 	        "fi\n"
+	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
+	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
+	        "export MISTER_MAGIK_DISPLAY_CONFIRM_UI=%d\n"
 	        ": >/tmp/mister-magik-slint.log\n"
 	        "if %s && [ -f \"%s\" ] && ! grep -q '^mister_magik_scanout_slots ' /proc/modules 2>/dev/null; then\n"
 	        "  insmod \"%s\" >>/tmp/mister-magik-slint.log 2>&1 || true\n"
@@ -1282,11 +1286,12 @@ static bool write_launcher_script(const char *path)
 	        "fi\n"
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
-	        resolved_runtime_output(),
-	        configured_display_mode(),
 	        return_spawn ? 1 : 0,
 	        layout_path("launcher.env"),
 	        layout_path("launcher.env"),
+	        resolved_runtime_output(),
+	        configured_display_mode(),
+	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0,
 	        artifact_verify_command(),
 	        layout_path("mister_magik_scanout_slots.ko"),
 	        layout_path("mister_magik_scanout_slots.ko"));

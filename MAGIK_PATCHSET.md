@@ -260,6 +260,16 @@ Update this section in every PR that adds behavior.
   power loss before successful confirmation keeps the previously persisted output.
   Main exports the configured display-mode ID to every replacement launcher so
   startup never derives its framebuffer policy from the previous FPGA route.
+  Operator tooling uses the separate acknowledged
+  `mister_magik_display_apply_headless_v1 mode=<id>` command. It has the same
+  provisional confirm/cancel safety contract, but Main exports
+  `MISTER_MAGIK_DISPLAY_CONFIRM_UI=0` so the replacement launcher never opens
+  the Settings confirmation dialog; UI-originated `display_apply_v1` exports
+  `1` and retains the countdown. Main re-exports these transaction-owned
+  values after optional `launcher.env` loading so local overrides cannot cross
+  the UI/headless boundary. Older launchers ignore the new environment value;
+  older Main builds reject the new typed command rather than silently applying
+  it through the UI route.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's
   normal `user_io_poll()` dormant while Slint owns display/input, but Main still
   has to know the hardware memory configuration before launching a core. Both

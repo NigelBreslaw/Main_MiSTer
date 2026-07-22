@@ -63,6 +63,7 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	case MagikLauncherCommandType::SettingsSetV1: return "SettingsSetV1";
 	case MagikLauncherCommandType::DisplayGetV1: return "DisplayGetV1";
 	case MagikLauncherCommandType::DisplayApplyV1: return "DisplayApplyV1";
+	case MagikLauncherCommandType::DisplayApplyHeadlessV1: return "DisplayApplyHeadlessV1";
 	case MagikLauncherCommandType::DisplayConfirmV1: return "DisplayConfirmV1";
 	case MagikLauncherCommandType::DisplayCancelV1: return "DisplayCancelV1";
 	case MagikLauncherCommandType::Invalid: return "Invalid";
@@ -322,6 +323,17 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 			return true;
 		}
 		cmd->type = MagikLauncherCommandType::DisplayApplyV1;
+		return true;
+	}
+	static const char display_headless_prefix[] = "mister_magik_display_apply_headless_v1 mode=";
+	if (!strncmp(line, display_headless_prefix, sizeof(display_headless_prefix) - 1))
+	{
+		if (!parse_runtime_output(line + sizeof(display_headless_prefix) - 1, &cmd->runtime_output))
+		{
+			set_error(cmd, "unsupported display mode");
+			return true;
+		}
+		cmd->type = MagikLauncherCommandType::DisplayApplyHeadlessV1;
 		return true;
 	}
 	if (!strcmp(line, "mister_magik_display_confirm_v1"))

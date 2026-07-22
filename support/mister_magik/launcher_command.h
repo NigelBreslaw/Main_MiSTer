@@ -23,6 +23,7 @@ enum class MagikLauncherCommandType
 	SettingsSetV1,
 	DisplayGetV1,
 	DisplayApplyV1,
+	DisplayApplyHeadlessV1,
 	DisplayConfirmV1,
 	DisplayCancelV1,
 	Invalid,

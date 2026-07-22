@@ -2760,7 +2760,8 @@ void video_reinit()
 bool video_apply_runtime_output(const char *mode)
 {
 	if (!mode || !mode[0]) return false;
-	if (!strcmp(mode, "auto"))
+	const bool auto_requested = !strcmp(mode, "auto");
+	if (auto_requested)
 	{
 		cfg.direct_video = 2;
 	}
@@ -2792,7 +2793,10 @@ bool video_apply_runtime_output(const char *mode)
 	hdmi_config_init();
 	hdmi_invalidate_mode_cache();
 	hdmi_config_set_hdr();
-	video_mode_load(true);
+	// Preserve automatic sink detection only while applying auto itself. An
+	// explicit mode, including transaction rollback, must clear the static
+	// auto-routing latch before loading its saved geometry.
+	video_mode_load(auto_requested);
 	video_set_mode(&v_def, 0);
 	user_io_send_buttons(1);
 	video_mode_adjust(true);

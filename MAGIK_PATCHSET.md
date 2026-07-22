@@ -253,9 +253,11 @@ Update this section in every PR that adds behavior.
   restarts only the launcher. Main starts a ten-second deadline when the new
   launcher queries the pending state, retains a bounded no-launcher fallback,
   and restores the in-memory working mode on cancel or timeout. Confirmation
-  delegates comment-preserving atomic `MiSTer.ini` persistence to the matching
-  `mister-magik-fb`; therefore a crash or power loss before confirmation keeps
-  the previously persisted output.
+  delegates comment-preserving atomic `MiSTer.ini` persistence to a supervised,
+  asynchronously polled matching `mister-magik-fb` child. Failure keeps the
+  mode provisional for retry or cancellation; rollback terminates any active
+  persistence child and publishes a one-shot Settings return intent. A crash or
+  power loss before successful confirmation keeps the previously persisted output.
 - MagiK pre-handoff SDRAM probe update: MagiK launch-active mode keeps Main's
   normal `user_io_poll()` dormant while Slint owns display/input, but Main still
   has to know the hardware memory configuration before launching a core. Both

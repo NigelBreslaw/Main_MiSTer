@@ -151,9 +151,13 @@ struct DisplayTransaction
 	char old_video_conf[1024];
 	unsigned long deadline_ms;
 	unsigned long fallback_deadline_ms;
+	pid_t persist_pid;
+	char persist_error[64];
 };
 
 static DisplayTransaction s_display_transaction = {};
+static bool s_display_return_settings = false;
+static char s_display_return_error[64] = {};
 
 static const char *configured_display_mode()
 {
@@ -844,9 +848,15 @@ static void video_reinit_diagnostic(void)
 	eventf("display_diag_reinit_done", "state=%s", magik_launcher_state_name(s_state));
 }
 
-static bool restore_display_transaction()
+static bool restore_display_transaction(const char *return_error = NULL)
 {
 	if (!s_display_transaction.pending) return false;
+	if (s_display_transaction.persist_pid > 0)
+	{
+		kill(s_display_transaction.persist_pid, SIGTERM);
+		waitpid(s_display_transaction.persist_pid, NULL, 0);
+		s_display_transaction.persist_pid = 0;
+	}
 	if (s_state == MagikLauncherState::LauncherActive) suspend_launcher();
 	video_fb_enable(0);
 	cfg.direct_video = s_display_transaction.old_direct_video;
@@ -856,8 +866,43 @@ static bool restore_display_transaction()
 	s_display_transaction.pending = false;
 	s_display_transaction.deadline_ms = 0;
 	s_display_transaction.fallback_deadline_ms = 0;
-	if (!video_apply_runtime_output(configured_display_mode())) return false;
+	s_display_transaction.persist_error[0] = 0;
+	if (!video_apply_runtime_output(configured_display_mode()))
+	{
+		snprintf(s_display_return_error, sizeof(s_display_return_error), "rollback-video-failed");
+		s_display_return_settings = true;
+		restart_launcher();
+		return false;
+	}
+	if (return_error)
+		snprintf(s_display_return_error, sizeof(s_display_return_error), "%s", return_error);
+	else
+		s_display_return_error[0] = 0;
+	s_display_return_settings = true;
 	restart_launcher();
+	return true;
+}
+
+static bool start_display_persist()
+{
+	if (s_display_transaction.persist_pid > 0) return false;
+	s_display_transaction.persist_error[0] = 0;
+	pid_t pid = fork();
+	if (pid < 0)
+	{
+		snprintf(s_display_transaction.persist_error, sizeof(s_display_transaction.persist_error), "spawn-failed");
+		return false;
+	}
+	if (!pid)
+	{
+		const char *binary = layout_path("mister-magik-fb");
+		execl(binary, binary, "display-persist", magik_runtime_output_name(s_display_transaction.requested), (char *)NULL);
+		_exit(127);
+	}
+	s_display_transaction.persist_pid = pid;
+	s_display_transaction.deadline_ms = 0;
+	s_display_transaction.fallback_deadline_ms = GetTimer(0) + 15000;
+	eventf("display_persist_started", "pid=%d mode=%s", pid, magik_runtime_output_name(s_display_transaction.requested));
 	return true;
 }
 
@@ -893,7 +938,8 @@ static void process_command_line(const char *line)
 	}
 	if (cmd.type == MagikLauncherCommandType::DisplayGetV1)
 	{
-		if (s_display_transaction.pending && !s_display_transaction.deadline_ms)
+		if (s_display_transaction.pending && !s_display_transaction.deadline_ms &&
+		    s_display_transaction.persist_pid <= 0 && !s_display_transaction.persist_error[0])
 			s_display_transaction.deadline_ms = GetTimer(0) + 10000;
 		unsigned long remaining = 0;
 		if (s_display_transaction.pending && s_display_transaction.deadline_ms)
@@ -901,10 +947,22 @@ static void process_command_line(const char *line)
 			unsigned long now = GetTimer(0);
 			remaining = now < s_display_transaction.deadline_ms ? (s_display_transaction.deadline_ms - now + 999) / 1000 : 0;
 		}
-		reply_commandf("ok DisplayV1 schema=1 active=%s pending=%s remaining=%lu",
+		const char *phase = !s_display_transaction.pending ? "idle" :
+		                    s_display_transaction.persist_pid > 0 ? "persisting" :
+		                    s_display_transaction.persist_error[0] ? "failed" : "provisional";
+		const char *return_screen = s_display_return_settings ? "settings" : "none";
+		const char *display_error = s_display_transaction.persist_error[0] ?
+		                            s_display_transaction.persist_error :
+		                            s_display_return_error[0] ? s_display_return_error : "none";
+		reply_commandf("ok DisplayV1 schema=1 active=%s pending=%s remaining=%lu phase=%s error=%s return=%s",
 		                 configured_display_mode(),
 		                 s_display_transaction.pending ? magik_runtime_output_name(s_display_transaction.requested) : "none",
-		                 remaining);
+		                 remaining,
+		                 phase,
+		                 display_error,
+		                 return_screen);
+		s_display_return_settings = false;
+		s_display_return_error[0] = 0;
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::DisplayApplyV1)
@@ -921,12 +979,14 @@ static void process_command_line(const char *line)
 		s_display_transaction.old_forced_scandoubler = cfg.forced_scandoubler;
 		snprintf(s_display_transaction.old_video_conf, sizeof(s_display_transaction.old_video_conf), "%s", cfg.video_conf);
 		s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
+		s_display_transaction.persist_pid = 0;
+		s_display_transaction.persist_error[0] = 0;
 		mister_magik_command_reply("ok DisplayRestarting");
 		suspend_launcher();
 		video_fb_enable(0);
 		if (!video_apply_runtime_output(magik_runtime_output_name(cmd.runtime_output)))
 		{
-			(void)restore_display_transaction();
+			(void)restore_display_transaction("video-apply-failed");
 			return;
 		}
 		restart_launcher();
@@ -939,17 +999,17 @@ static void process_command_line(const char *line)
 			mister_magik_command_reply("rejected no-display-transaction");
 			return;
 		}
-		char command[PATH_MAX + 256];
-		snprintf(command, sizeof(command), "%s display-persist %s", layout_path("mister-magik-fb"), magik_runtime_output_name(s_display_transaction.requested));
-		if (system(command) != 0)
+		if (s_display_transaction.persist_pid > 0)
 		{
-			mister_magik_command_reply("error display-persist-failed");
+			mister_magik_command_reply("ok DisplayConfirming");
 			return;
 		}
-		s_display_transaction.pending = false;
-		s_display_transaction.deadline_ms = 0;
-		s_display_transaction.fallback_deadline_ms = 0;
-		mister_magik_command_reply("ok DisplayConfirmed");
+		if (!start_display_persist())
+		{
+			mister_magik_command_reply("error display-persist-spawn-failed");
+			return;
+		}
+		mister_magik_command_reply("ok DisplayConfirming");
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::DisplayCancelV1)
@@ -1453,6 +1513,30 @@ void mister_magik_launcher_poll(void)
 	if (!mister_magik_launcher_configured()) return;
 	static unsigned long last_heartbeat_ms;
 	unsigned long now_ms = GetTimer(0);
+	if (s_display_transaction.persist_pid > 0)
+	{
+		int status = 0;
+		pid_t pid = s_display_transaction.persist_pid;
+		if (waitpid(pid, &status, WNOHANG) == pid)
+		{
+			s_display_transaction.persist_pid = 0;
+			if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+			{
+				s_display_transaction.pending = false;
+				s_display_transaction.deadline_ms = 0;
+				s_display_transaction.fallback_deadline_ms = 0;
+				s_display_transaction.persist_error[0] = 0;
+				eventf("display_persist_completed", "pid=%d", pid);
+			}
+			else
+			{
+				snprintf(s_display_transaction.persist_error, sizeof(s_display_transaction.persist_error), "persist-failed");
+				s_display_transaction.deadline_ms = GetTimer(0) + 10000;
+				s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
+				eventf("display_persist_failed", "pid=%d status=%d", pid, WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+			}
+		}
+	}
 	if (s_display_transaction.pending &&
 	    ((s_display_transaction.deadline_ms && now_ms >= s_display_transaction.deadline_ms) ||
 	     (s_display_transaction.fallback_deadline_ms && now_ms >= s_display_transaction.fallback_deadline_ms)))

@@ -2209,14 +2209,12 @@ static void video_set_mode(vmode_custom_t *v, double Fpix)
 	vmode_custom_t v_fix = v_cur;
 	if (cfg.direct_video)
 	{
-		const int fb_dv_bottom_border =
-			(v_cur.item[1] == 640 && v_cur.item[5] == 576) ? FB_DV_BBRD + 1 : FB_DV_BBRD;
 		v_fix.item[2] = FB_DV_RBRD;
 		v_fix.item[4] = FB_DV_LBRD;
 		v_fix.item[1] += v_cur.item[2] - v_fix.item[2];
 		v_fix.item[1] += v_cur.item[4] - v_fix.item[4];
 
-		v_fix.item[6] = fb_dv_bottom_border;
+		v_fix.item[6] = FB_DV_BBRD;
 		v_fix.item[8] = FB_DV_UBRD;;
 		v_fix.item[5] += v_cur.item[6] - v_fix.item[6];
 		v_fix.item[5] += v_cur.item[8] - v_fix.item[8];

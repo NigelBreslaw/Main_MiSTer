@@ -29,6 +29,11 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-command"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/tests/launcher_display_timing_test.cpp" \
+  -o "$OUT-display-timing"
+"$OUT-display-timing"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_diag.cpp" \
   "$ROOT/tests/launcher_diag_test.cpp" \
   -o "$OUT-diag"

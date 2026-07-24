@@ -3,6 +3,7 @@
 #include "launcher_reply.h"
 #include "launcher_command.h"
 #include "launcher_diag.h"
+#include "launcher_display_timing.h"
 #include "launcher_return.h"
 #include "launcher_wait.h"
 #include "layout.h"
@@ -943,7 +944,7 @@ static void process_command_line(const char *line)
 	{
 		if (s_display_transaction.pending && !s_display_transaction.deadline_ms &&
 		    s_display_transaction.persist_pid <= 0 && !s_display_transaction.persist_error[0])
-			s_display_transaction.deadline_ms = GetTimer(0) + 10000;
+			s_display_transaction.deadline_ms = GetTimer(0) + MAGIK_DISPLAY_CONFIRM_TIMEOUT_MS;
 		unsigned long remaining = 0;
 		if (s_display_transaction.pending && s_display_transaction.deadline_ms)
 		{
@@ -982,7 +983,7 @@ static void process_command_line(const char *line)
 		s_display_transaction.old_menu_pal = cfg.menu_pal;
 		s_display_transaction.old_forced_scandoubler = cfg.forced_scandoubler;
 		snprintf(s_display_transaction.old_video_conf, sizeof(s_display_transaction.old_video_conf), "%s", cfg.video_conf);
-		s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
+		s_display_transaction.fallback_deadline_ms = GetTimer(0) + MAGIK_DISPLAY_FALLBACK_TIMEOUT_MS;
 		s_display_transaction.persist_pid = 0;
 		s_display_transaction.persist_error[0] = 0;
 		s_display_transaction.confirm_ui = cmd.type == MagikLauncherCommandType::DisplayApplyV1;
@@ -1540,8 +1541,8 @@ void mister_magik_launcher_poll(void)
 			else
 			{
 				snprintf(s_display_transaction.persist_error, sizeof(s_display_transaction.persist_error), "persist-failed");
-				s_display_transaction.deadline_ms = GetTimer(0) + 10000;
-				s_display_transaction.fallback_deadline_ms = GetTimer(0) + 20000;
+				s_display_transaction.deadline_ms = GetTimer(0) + MAGIK_DISPLAY_CONFIRM_TIMEOUT_MS;
+				s_display_transaction.fallback_deadline_ms = GetTimer(0) + MAGIK_DISPLAY_FALLBACK_TIMEOUT_MS;
 				eventf("display_persist_failed", "pid=%d status=%d", pid, WIFEXITED(status) ? WEXITSTATUS(status) : -1);
 			}
 		}

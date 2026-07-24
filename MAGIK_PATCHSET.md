@@ -250,7 +250,7 @@ Update this section in every PR that adds behavior.
 - Runtime display transactions v1 add typed get/apply/confirm/cancel commands
   for the qualified HDMI modes, automatic HDMI-DAC detection, and the four
   standard CRT/VGA modes. Apply suspends Slint, forces Main's video mode, and
-  restarts only the launcher. Main starts a ten-second deadline when the new
+  restarts only the launcher. Main starts a twenty-second deadline when the new
   launcher queries the pending state, retains a bounded no-launcher fallback,
   and restores the in-memory working mode on cancel or timeout. Confirmation
   delegates comment-preserving atomic `MiSTer.ini` persistence to a supervised,

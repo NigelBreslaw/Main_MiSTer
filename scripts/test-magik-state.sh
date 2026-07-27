@@ -74,6 +74,11 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-input-proxy"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/tests/user_io_config_map_test.cpp" \
+  -o "$OUT-user-io-config-map"
+"$OUT-user-io-config-map"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/sdram_probe.cpp" \
   "$ROOT/tests/sdram_probe_test.cpp" \
   -o "$OUT-sdram-probe"
@@ -175,6 +180,38 @@ grep -q 'latch-readiness-report' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'mister-magik-scanout"' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'execl(path, path, "early-black"' "$ROOT/support/mister_magik/launcher.cpp"
+
+awk '
+  /static void restore_stock_menu_after_failed_spawn/ { in_cleanup=1; child_guard=0; osd=0; input=0 }
+  in_cleanup && /if \(s_pid\)/ { child_guard=1 }
+  in_cleanup && /user_io_osd_key_enable\(1\)/ { osd=child_guard }
+  in_cleanup && /input_switch\(1\)/ { input=child_guard }
+  in_cleanup && /launcher_spawn_restored_stock_menu/ {
+    if (!child_guard || !osd || !input) exit 1
+    checked=1
+    in_cleanup=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: failed-spawn cleanup must guard against enabling stock OSD/input with a live launcher child" >&2
+  exit 1
+}
+
+awk '
+  /launcher_spawn_black_route_start/ { in_route=1; failed=0; returned=0 }
+  in_route && /launcher_spawn_black_route_failed/ { failed=1 }
+  in_route && /return MagikLauncherSpawnResult::Failed/ { returned=failed }
+  in_route && /s_pid = fork\(\)/ {
+    if (!returned) exit 1
+    checked=1
+    in_route=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: Main must not spawn MagiK after the framebuffer route fails" >&2
+  exit 1
+}
 
 verify_manifest_selection_fixture() {
   local app="$1"

@@ -26,6 +26,9 @@ reapplied at their narrow integration seams.
 
 - Boot through stock `/media/fat/MiSTer` and MiSTer.ini `main=MiSTer_MagiK`.
 - Let Main initialize HDMI/video/menu-core prerequisites.
+- Keep Main as the sole writer of the complete `UIO_BUT_SW` framework word,
+  including the launcher framebuffer mux, composite sync, SoG, Direct Video,
+  scaler, audio, and HDMI flags.
 - Start MiSTer MagiK Slint on `tty2` after Main video initialization.
 - Keep Main in dormant launcher mode while Slint owns the visible launcher UI.
   Dormant launcher mode blocks on the command FIFO and supervised-child exit,
@@ -109,7 +112,9 @@ Runtime changes should stay in or immediately around:
 - `support/arcade/mra_loader.cpp` / `support/arcade/mra_loader.h` only for
   shared RBF-name resolution and direct MGL action seeding used by structured
   handoff
-- `user_io.cpp` post-`video_init()` / Menu-core boot hook
+- `user_io.cpp` / `user_io.h` only for the post-`video_init()` Menu-core boot
+  hook and the testable framework-word builder used by Main's existing
+  `user_io_send_buttons()` path
 - `input.cpp` only for MagiK simple joystick policy gating, MagiK-owned
   baseline-map loading, and the launcher menu-input proxy
 - `joymapping.cpp` only for applying MagiK-provided simple-mode button override
@@ -133,6 +138,14 @@ Build/docs/test changes may touch:
 - `tests/`
 
 ## Implemented Features And Tests
+
+- Main-owned launcher routing: `video_magik_route_black()` must succeed before
+  the supervised child is spawned. Rust no longer receives an `early-black`
+  fallback that could replace Main's framework word. Missing artifacts, route
+  failure, and fork failure restore stock Menu only while no launcher child
+  exists; the active-child OSD/input suppression invariant is unchanged.
+  Host tests verify that toggling `CONF_VGA_FB` preserves composite sync, SoG,
+  Direct Video, scaler, audio, HDMI, and button bits.
 
 Update this section in every PR that adds behavior.
 

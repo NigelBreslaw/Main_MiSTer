@@ -576,6 +576,29 @@ static void set_status_string(char *dst, size_t len, const char *fmt, ...)
 	dst[len - 1] = 0;
 }
 
+// Fail closed only while no launcher child exists. Once MagiK has spawned,
+// Main must keep the stock OSD and input path suppressed until an explicit
+// handoff or supervised shutdown completes.
+static void restore_stock_menu_after_failed_spawn(void)
+{
+	if (s_pid)
+	{
+		mister_magik_record_invariant(
+			"failed_spawn_cleanup_with_live_child",
+			"refused to enable stock menu while launcher child exists");
+		return;
+	}
+
+	s_spawn_pending = false;
+	transition(MagikLauncherEvent::ResetToUnconfigured);
+	input_switch(1);
+	user_io_osd_key_enable(1);
+	video_fb_enable(0);
+	video_menu_bg(user_io_status_get("[3:1]"));
+	OsdEnable(DISABLE_KEYBOARD);
+	eventf("launcher_spawn_restored_stock_menu", "child=none");
+}
+
 static void stop_launcher_child(void)
 {
 	if (!s_pid) return;
@@ -1324,6 +1347,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
 		eventf("launcher_missing", "path=%s", magik_launcher_relative_path());
+		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
@@ -1331,6 +1355,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
 		eventf("launcher_script_failed", "script=%s", s_script_path);
+		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
@@ -1342,13 +1367,21 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	if (video_magik_route_black())
 		eventf("launcher_spawn_black_route_completed", "source=main format=565");
 	else
+	{
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "black_route_failed source=main");
 		eventf("launcher_spawn_black_route_failed", "source=main");
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
 
 	s_pid = fork();
 	if (s_pid < 0)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fork_failed errno=%d", errno);
 		eventf("launcher_fork_failed", "errno=%d", errno);
+		s_pid = 0;
+		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
@@ -1487,38 +1520,7 @@ void mister_magik_launcher_route_early_black(void)
 		eventf("early_black_route_completed", "source=main format=565");
 		return;
 	}
-	eventf("early_black_main_route_failed", "fallback=fork_exec");
-
-	char path[2100];
-	strncpy(path, getFullPath(magik_launcher_relative_path()), sizeof(path) - 1);
-	path[sizeof(path) - 1] = '\0';
-	eventf("early_black_spawn", "path=%s", path);
-
-	pid_t pid = fork();
-	if (pid < 0)
-	{
-		eventf("early_black_fork_failed", "errno=%d", errno);
-		return;
-	}
-	if (!pid)
-	{
-		setenv("MISTER_MAGIK_PARENT", "main-mister", 1);
-		execl(path, path, "early-black", NULL);
-		_exit(127);
-	}
-	int status = 0;
-	for (int i = 0; i < 100; i++)
-	{
-		if (waitpid(pid, &status, WNOHANG) == pid)
-		{
-			eventf("early_black_exit", "pid=%d status=%d", pid, WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-			return;
-		}
-		usleep(10000);
-	}
-	kill(pid, SIGKILL);
-	waitpid(pid, NULL, 0);
-	eventf("early_black_timeout", "pid=%d", pid);
+	eventf("early_black_main_route_failed", "fallback=none action=defer-to-launch");
 }
 
 void mister_magik_launcher_enter_after_menu_init(void)

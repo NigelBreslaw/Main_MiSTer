@@ -35,7 +35,11 @@ static void scheduler_co_poll(void)
 			if (mister_magik_launcher_active())
 			{
 				mister_magik_launcher_poll();
-				if (mister_magik_launcher_idle_waits())
+				if (mister_magik_launcher_input_proxy_active())
+				{
+					input_poll_launcher(mister_magik_launcher_command_fd());
+				}
+				else if (mister_magik_launcher_idle_waits())
 				{
 					mister_magik_launcher_wait_for_activity();
 				}

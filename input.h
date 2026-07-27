@@ -100,6 +100,8 @@ void sysled_enable(int en);
 
 void input_notify_mode();
 int input_poll(int getchar);
+int input_poll_launcher(int command_fd);
+void input_prepare_launcher_proxy();
 int is_key_pressed(int key);
 
 void start_map_setting(int cnt, int set = 0, advancedButtonMap *code_store = NULL);

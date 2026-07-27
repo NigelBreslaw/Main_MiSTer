@@ -38,6 +38,7 @@
 #include "file_io.h"
 #include "support/mister_magik/layout.h"
 #include "support/mister_magik/launcher.h"
+#include "support/mister_magik/input_proxy.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -2409,6 +2410,13 @@ uint32_t build_autofire_mask(int player)
 
 static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int bnum, int dont_save = 0)
 {
+	if (mister_magik_launcher_input_proxy_active())
+	{
+		int key = magik_input_proxy_key(mask, bnum == BTN_OSD);
+		if (key) uinp_send_key(key, press);
+		return;
+	}
+
 	int num = jnum - 1;
 	if (num < NUMPLAYERS)
 	{
@@ -3672,7 +3680,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 					if (osd_event == 2) joy_digital(input[dev].num, 0, 0, 0, BTN_OSD);
 				}
 
-				if (user_io_osd_is_visible() || video_fb_state())
+				if (user_io_osd_is_visible() || video_fb_state() || mister_magik_launcher_input_proxy_active())
 				{
 					if (ev->value <= 1)
 					{
@@ -5180,7 +5188,7 @@ static void setup_wheels()
 	}
 }
 
-int input_test(int getchar)
+static int input_test(int getchar, bool launcher_mode, int launcher_command_fd, bool initialize_only)
 {
 	PROFILE_FUNCTION();
 	static char cur_leds = 0;
@@ -5633,6 +5641,8 @@ int input_test(int getchar)
 		state++;
 	}
 
+	if (initialize_only) return 0;
+
 	if (cfg.bt_auto_disconnect)
 	{
 		if (!timeout) timeout = GetTimer(6000);
@@ -5664,7 +5674,8 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && video_fb_state()) timeout = 25;
+		if (launcher_mode) timeout = 1000;
+		else if (is_menu() && video_fb_state()) timeout = 25;
 
 		while (1)
 		{
@@ -5684,8 +5695,19 @@ int input_test(int getchar)
 			}
 
 
+			struct pollfd command_poll = pool[NUMDEV + 1];
+			if (launcher_mode)
+			{
+				pool[NUMDEV + 1].fd = launcher_command_fd;
+				pool[NUMDEV + 1].events = launcher_command_fd >= 0 ? POLLIN : 0;
+				pool[NUMDEV + 1].revents = 0;
+			}
 			int return_value = poll(pool, NUMDEV + 3, timeout);
+			bool launcher_command_ready = launcher_mode &&
+				(pool[NUMDEV + 1].revents & POLLIN);
+			pool[NUMDEV + 1] = command_poll;
 			if (!return_value) break;
+			if (launcher_command_ready) break;
 
 			if (return_value < 0)
 			{
@@ -6294,7 +6316,7 @@ int input_test(int getchar)
 				}
 			}
 
-			if ((pool[NUMDEV + 1].fd >= 0) && (pool[NUMDEV + 1].revents & POLLIN))
+			if (!launcher_mode && (pool[NUMDEV + 1].fd >= 0) && (pool[NUMDEV + 1].revents & POLLIN))
 			{
 				static char cmd[1024];
 				int len = read(pool[NUMDEV + 1].fd, cmd, sizeof(cmd) - 1);
@@ -6394,7 +6416,7 @@ void key_update_frames_held_cb(void)
 	}
 }
 
-int input_poll(int getchar)
+static int input_poll_mode(int getchar, bool launcher_mode, int launcher_command_fd)
 {
 	#ifdef PROFILING
 		PROFILE_FUNCTION();
@@ -6407,7 +6429,7 @@ int input_poll(int getchar)
 	add_frame_callback(key_update_frames_held_cb);
 
 
-	int ret = input_test(getchar);
+	int ret = input_test(getchar, launcher_mode, launcher_command_fd, false);
 	if (getchar) return ret;
 
 	uinp_check_key();
@@ -6485,6 +6507,21 @@ int input_poll(int getchar)
 	}
 
 	return 0;
+}
+
+int input_poll(int getchar)
+{
+	return input_poll_mode(getchar, false, -1);
+}
+
+int input_poll_launcher(int command_fd)
+{
+	return input_poll_mode(0, true, command_fd);
+}
+
+void input_prepare_launcher_proxy()
+{
+	(void)input_test(0, true, -1, true);
 }
 
 int is_key_pressed(int key)

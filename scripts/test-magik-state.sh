@@ -68,6 +68,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-button-overrides"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/input_proxy.cpp" \
+  "$ROOT/tests/input_proxy_test.cpp" \
+  -o "$OUT-input-proxy"
+"$OUT-input-proxy"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/sdram_probe.cpp" \
   "$ROOT/tests/sdram_probe_test.cpp" \
   -o "$OUT-sdram-probe"

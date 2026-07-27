@@ -60,6 +60,10 @@ reapplied at their narrow integration seams.
   that launched core, uses MagiK-owned controller baselines from
   `/media/fat/mister-magik/input/`, and then falls back to Main's existing
   gamecontrollerdb/default mapping path if MagiK has no managed baseline.
+- Keep Main's stock menu controller mapping authoritative while the launcher is
+  active. Main polls evdev and hot-plug state with a bounded blocking wait,
+  applies custom Menu OK/Back and normal gamecontrollerdb/user-map precedence,
+  and emits resolved actions through its virtual input device for Rust.
 - Publish status and event files under `/tmp/mister-magik/`.
 - Write local crash reports under `/media/fat/mister-magik/crashes/` when the
   supervised launcher child exits unexpectedly, and surface the latest report
@@ -106,8 +110,8 @@ Runtime changes should stay in or immediately around:
   shared RBF-name resolution and direct MGL action seeding used by structured
   handoff
 - `user_io.cpp` post-`video_init()` / Menu-core boot hook
-- `input.cpp` only for MagiK simple joystick policy gating and MagiK-owned
-  baseline-map loading
+- `input.cpp` only for MagiK simple joystick policy gating, MagiK-owned
+  baseline-map loading, and the launcher menu-input proxy
 - `joymapping.cpp` only for applying MagiK-provided simple-mode button override
   tokens by MRA button index
 - `scheduler.cpp` dormant-mode polling seam
@@ -300,20 +304,24 @@ Update this section in every PR that adds behavior.
   base virtual names (`A/B/X/Y/L/R/Select/Start`) or `unmap`. Main does not
   parse MRA XML or classify labels such as coin/start/pause; all arcade policy
   remains in MagiK.
-- Dormant idle CPU update: `LauncherActive`, `LauncherSuspended`, and
-  `LauncherCrashed` now report that the Main loop should wait between poll
-  passes. The non-scheduler loop and scheduler poll coroutine both use the same
-  policy hook after `mister_magik_launcher_poll()`, preserving normal stock
-  Main polling outside MagiK-owned dormant states while preventing the
-  supervised launcher from pinning CPU1 at 100%. Host state tests cover the
-  idle-wait policy for active, suspended, crashed, handoff, suspending, and
-  rebooting states. The wait itself uses `poll()` on `/dev/MiSTer_cmd` plus a
-  `SIGCHLD` self-pipe, so commands and supervised-child exits wake immediately;
-  the previous signal disposition is restored after every dormant wait so the
-  stock core/menu path is unchanged after handoff. A one-second timeout retains
-  bounded launcher-path and scanout-module health checks without the previous
-  100 Hz filesystem/FIFO polling. Host wait tests cover timeout, FIFO wake, and
-  child-exit wake behavior.
+- Launcher input proxy update: before spawning Rust, Main initializes its stock
+  evdev/uinput subsystem and advertises `MISTER_MAGIK_INPUT_PROXY=1`. While
+  `LauncherActive`, the normal mapping path remains responsible for user menu
+  maps, gamecontrollerdb fallback, controller quirks, analogue thresholds,
+  custom Menu OK/Back, combinations, and hot-plug discovery. Resolved menu
+  actions are translated to a stable virtual-key protocol and written through
+  `MiSTer virtual input`; no OSD or core action is performed. The launcher poll
+  waits on evdev, hot-plug, and the launcher-owned command descriptor, but never
+  consumes the command bytes. Rust therefore receives original Main semantics
+  while the existing launcher command parser retains FIFO ownership.
+- Dormant idle CPU update: `LauncherActive` blocks in the stock input poll with
+  a one-second maintenance timeout, while `LauncherSuspended` and
+  `LauncherCrashed` use the command/SIGCHLD wait. The non-scheduler loop and
+  scheduler coroutine share that policy, preserving normal stock Main polling
+  after handoff while preventing the supervised launcher from pinning CPU1.
+  The previous signal disposition is restored after each command/SIGCHLD wait.
+  Host tests cover proxy key translation, timeout, FIFO wake, and child-exit
+  wake behavior.
 - Attended display diagnostics update: Main accepts three explicit
   MagiK FIFO commands for rare HDMI/scaler bad-state experiments without a
   Linux reboot. `mister_magik_hdmi_power_cycle` toggles ADV7513 HDMI power.

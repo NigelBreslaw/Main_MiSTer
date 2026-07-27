@@ -1269,6 +1269,7 @@ static bool write_launcher_script(const char *path)
 	        "export LC_ALL=en_US.UTF-8\n"
 	        "export HOME=/root\n"
 	        "export MISTER_MAGIK_PARENT=main-mister\n"
+	        "export MISTER_MAGIK_INPUT_PROXY=1\n"
 	        "export MISTER_MAGIK_RETURN_TO_LAUNCHER=%d\n"
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
@@ -1377,6 +1378,17 @@ bool mister_magik_launcher_active(void)
 {
 	if (s_video_diagnostic_active) return false;
 	return magik_launcher_is_active(s_state);
+}
+
+bool mister_magik_launcher_input_proxy_active(void)
+{
+	return !s_video_diagnostic_active && s_state == MagikLauncherState::LauncherActive;
+}
+
+int mister_magik_launcher_command_fd(void)
+{
+	ensure_command_fifo();
+	return s_cmd_fd;
 }
 
 bool mister_magik_launcher_main_framebuffer_suppressed(void)
@@ -1513,6 +1525,7 @@ void mister_magik_launcher_enter_after_menu_init(void)
 {
 	if (!mister_magik_launcher_configured()) return;
 	clear_input_policy_marker();
+	input_prepare_launcher_proxy();
 	if (s_state == MagikLauncherState::BootingMain)
 		transition(MagikLauncherEvent::BeginEnterLauncher);
 	s_spawn_pending = true;

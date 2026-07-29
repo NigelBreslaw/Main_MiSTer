@@ -184,7 +184,13 @@ grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch-readiness-report' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'run_launcher_readiness_preflight' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch_startup_tsv valid=1 action=launch-latch-ui reason=preflight-passed' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'compatibility-screen' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'video_magik_route_black' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'mister_magik_supervised_restart_launcher' "$ROOT/support/mister_magik/launcher_command.cpp"
+grep -q 'launcher-restart-token' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'launcher-restart-used' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'mister-magik-scanout"' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'execl(path, path, "early-black"' "$ROOT/support/mister_magik/launcher.cpp"
@@ -206,17 +212,26 @@ awk '
 }
 
 awk '
-  /launcher_spawn_black_route_start/ { in_route=1; failed=0; returned=0 }
-  in_route && /launcher_spawn_black_route_failed/ { failed=1 }
-  in_route && /return MagikLauncherSpawnResult::Failed/ { returned=failed }
-  in_route && /s_pid = fork\(\)/ {
-    if (!returned) exit 1
+  /static MagikLauncherSpawnResult spawn_launcher\(void\)/ && $0 !~ /;/ { spawn_signature=1; next }
+  spawn_signature && /^\{/ {
+    in_spawn=1
+    spawn_signature=0
+    preflight=0
+    owner=0
+  }
+  in_spawn && /run_launcher_readiness_preflight\(path\)/ { preflight=1 }
+  in_spawn && /transfer_fpga_owner_to_launcher/ {
+    if (!preflight) exit 1
+    owner=1
+  }
+  in_spawn && /s_pid = fork\(\)/ {
+    if (!preflight || !owner) exit 1
     checked=1
-    in_route=0
+    in_spawn=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
-  echo "ERROR: Main must not spawn MagiK after the framebuffer route fails" >&2
+  echo "ERROR: Main must complete readiness preflight before FPGA ownership transfer and launcher spawn" >&2
   exit 1
 }
 

@@ -13,6 +13,7 @@ enum class MagikLauncherCommandType
 	Suspend,
 	Resume,
 	RestartLauncher,
+	SupervisedRestartLauncher,
 	HdmiPowerCycle,
 	VideoAdjust,
 	VideoReinit,

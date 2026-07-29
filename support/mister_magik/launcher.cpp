@@ -182,6 +182,42 @@ static void clear_input_policy_marker(void)
 static void eventf(const char *event, const char *fmt, ...);
 static void set_status_string(char *dst, size_t len, const char *fmt, ...);
 
+static bool transfer_fpga_owner_to_launcher(const char *site)
+{
+	if (!fpga_io_transfer_to_magik(site))
+	{
+		mister_magik_record_invariant(
+			"fpga_owner_transfer_failed",
+			site ? site : "launcher");
+		return false;
+	}
+	eventf(
+		"fpga_owner_transferred",
+		"owner=%s epoch=%llu site=%s",
+		fpga_io_owner_name(),
+		(unsigned long long)fpga_io_owner_epoch(),
+		site ? site : "launcher");
+	return true;
+}
+
+static void restore_fpga_owner_to_main(const char *site)
+{
+	if (!strcmp(fpga_io_owner_name(), "main")) return;
+	if (!fpga_io_restore_to_main(site))
+	{
+		mister_magik_record_invariant(
+			"fpga_owner_restore_failed",
+			site ? site : "main");
+		return;
+	}
+	eventf(
+		"fpga_owner_transferred",
+		"owner=%s epoch=%llu site=%s",
+		fpga_io_owner_name(),
+		(unsigned long long)fpga_io_owner_epoch(),
+		site ? site : "main");
+}
+
 static void ensure_status_dir(void)
 {
 	mkdir(s_status_dir, 0755);
@@ -589,6 +625,7 @@ static void restore_stock_menu_after_failed_spawn(void)
 		return;
 	}
 
+	restore_fpga_owner_to_main("failed-spawn");
 	s_spawn_pending = false;
 	transition(MagikLauncherEvent::ResetToUnconfigured);
 	input_switch(1);
@@ -601,7 +638,11 @@ static void restore_stock_menu_after_failed_spawn(void)
 
 static void stop_launcher_child(void)
 {
-	if (!s_pid) return;
+	if (!s_pid)
+	{
+		restore_fpga_owner_to_main("no-child");
+		return;
+	}
 	pid_t pid = s_pid;
 	kill(-pid, SIGTERM);
 	kill(pid, SIGTERM);
@@ -610,6 +651,7 @@ static void stop_launcher_child(void)
 		if (waitpid(pid, NULL, WNOHANG) == pid)
 		{
 			s_pid = 0;
+			restore_fpga_owner_to_main("child-reaped");
 			return;
 		}
 		usleep(10000);
@@ -618,6 +660,7 @@ static void stop_launcher_child(void)
 	kill(pid, SIGKILL);
 	waitpid(pid, NULL, 0);
 	s_pid = 0;
+	restore_fpga_owner_to_main("child-killed");
 }
 
 static void complete_handoff_to_game(const char *path, bool external = false)
@@ -784,6 +827,7 @@ static bool begin_reboot_lockdown(const char *method)
 	transition(MagikLauncherEvent::RebootRequested);
 	s_spawn_pending = false;
 	close_command_fifo();
+	stop_launcher_child();
 	user_io_osd_key_enable(0);
 	OsdDisable();
 	input_switch(0);
@@ -1375,12 +1419,23 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		return MagikLauncherSpawnResult::Failed;
 	}
 
+	video_chvt(s_vt);
+	input_switch(0);
+	if (!transfer_fpga_owner_to_launcher("spawn-launcher"))
+	{
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fpga_owner_transfer_failed");
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
+
 	s_pid = fork();
 	if (s_pid < 0)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fork_failed errno=%d", errno);
 		eventf("launcher_fork_failed", "errno=%d", errno);
 		s_pid = 0;
+		restore_fpga_owner_to_main("fork-failed");
 		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
@@ -1395,8 +1450,6 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 
 	s_last_spawn_error[0] = 0;
 	log_msg("spawned pid=%d path=%s", s_pid, path);
-	video_chvt(s_vt);
-	input_switch(0);
 	transition(MagikLauncherEvent::ChildSpawned);
 	finish_pending_launcher_reply(MagikLauncherSpawnResult::Spawned);
 	return MagikLauncherSpawnResult::Spawned;
@@ -1498,6 +1551,13 @@ void mister_magik_status_write(void)
 	json_escape(f, fb_mode[0] ? fb_mode : "unknown");
 	fprintf(f, ",\"scanout_slots_module_loaded\":%s", access("/sys/module/mister_magik_scanout_slots", F_OK) == 0 ? "true" : "false");
 	fprintf(f, ",\"scanout_slots_device_ready\":%s", access("/dev/mister-magik-scanout-slots", R_OK | W_OK) == 0 ? "true" : "false");
+	fprintf(f, ",\"fpga_owner\":");
+	json_escape(f, fpga_io_owner_name());
+	fprintf(f, ",\"fpga_owner_epoch\":%llu", (unsigned long long)fpga_io_owner_epoch());
+	fprintf(f, ",\"blocked_spi_writes\":%llu", (unsigned long long)fpga_io_blocked_spi_writes());
+	fprintf(f, ",\"blocked_gpo_writes\":%llu", (unsigned long long)fpga_io_blocked_gpo_writes());
+	fprintf(f, ",\"last_blocked_fpga_site\":");
+	json_escape(f, fpga_io_last_blocked_site());
 	fprintf(f, ",\"invariant_count\":%lu", s_invariant_count);
 	fprintf(f, ",\"last_invariant_kind\":");
 	json_escape(f, s_last_invariant_kind);
@@ -1598,6 +1658,7 @@ void mister_magik_launcher_poll(void)
 		{
 			pid_t old_pid = s_pid;
 			s_pid = 0;
+			restore_fpga_owner_to_main("child-exited");
 			if (s_state == MagikLauncherState::LauncherRebooting)
 			{
 				transition(MagikLauncherEvent::ChildExitedExpectedly);

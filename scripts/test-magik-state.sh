@@ -40,6 +40,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-diag"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/fpga_ownership.cpp" \
+  "$ROOT/tests/fpga_ownership_test.cpp" \
+  -o "$OUT-fpga-ownership"
+"$OUT-fpga-ownership"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_return.cpp" \
   "$ROOT/tests/launcher_return_test.cpp" \
   -o "$OUT-return"

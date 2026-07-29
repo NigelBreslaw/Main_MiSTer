@@ -8,6 +8,7 @@
 #include <termios.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 #include "fpga_io.h"
 #include "file_io.h"
@@ -16,6 +17,7 @@
 #include "menu.h"
 #include "shmem.h"
 #include "offload.h"
+#include "support/mister_magik/fpga_ownership.h"
 
 #include "fpga_base_addr_ac5.h"
 #include "fpga_manager.h"
@@ -508,10 +510,33 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 }
 
 static uint32_t gpo_copy = 0;
-void inline fpga_gpo_write(uint32_t value)
+static MagikFpgaOwnership s_fpga_ownership;
+static pthread_mutex_t s_fpga_ownership_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void inline fpga_gpo_write_raw(uint32_t value)
 {
 	gpo_copy = value;
 	writel(value, (void*)(SOCFPGA_MGR_ADDRESS + 0x10));
+}
+
+static bool fpga_main_io_begin(MagikFpgaAccess access, const char *site)
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	if (s_fpga_ownership.allow_main(access, site)) return true;
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return false;
+}
+
+static void fpga_main_io_end()
+{
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+}
+
+static void inline fpga_gpo_write(uint32_t value)
+{
+	if (!fpga_main_io_begin(MagikFpgaAccess::Gpo, __func__)) return;
+	fpga_gpo_write_raw(value);
+	fpga_main_io_end();
 }
 
 #define fpga_gpo_writeN(value) writel((value), (void*)(SOCFPGA_MGR_ADDRESS + 0x10))
@@ -520,7 +545,9 @@ void inline fpga_gpo_write(uint32_t value)
 
 void fpga_core_write(uint32_t offset, uint32_t value)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Gpo, __func__)) return;
 	if (offset <= 0x1FFFFF) writel(value, (void*)(SOCFPGA_LWFPGASLAVES_ADDRESS + (offset & ~3)));
+	fpga_main_io_end();
 }
 
 uint32_t fpga_core_read(uint32_t offset)
@@ -536,6 +563,90 @@ int fpga_io_init()
 
 	fpga_gpo_write(0);
 	return 0;
+}
+
+bool fpga_io_transfer_to_magik(const char *site)
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	MagikFpgaOwnershipSnapshot snapshot = s_fpga_ownership.snapshot();
+	if (snapshot.owner != MagikFpgaOwner::Main)
+	{
+		pthread_mutex_unlock(&s_fpga_ownership_mutex);
+		return false;
+	}
+	// Rust starts from the same safe shadow: configured bit set, all selects,
+	// strobes, reset controls, and data lines clear.
+	fpga_gpo_write_raw(0x80000000);
+	bool transferred = s_fpga_ownership.transfer(
+		MagikFpgaOwner::Main,
+		MagikFpgaOwner::Launcher,
+		site);
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return transferred;
+}
+
+bool fpga_io_restore_to_main(const char *site)
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	MagikFpgaOwnershipSnapshot snapshot = s_fpga_ownership.snapshot();
+	if (snapshot.owner == MagikFpgaOwner::Main)
+	{
+		pthread_mutex_unlock(&s_fpga_ownership_mutex);
+		return true;
+	}
+	if (!s_fpga_ownership.transfer(
+			MagikFpgaOwner::Launcher,
+			MagikFpgaOwner::Main,
+			site))
+	{
+		pthread_mutex_unlock(&s_fpga_ownership_mutex);
+		return false;
+	}
+	// Discard the launcher's write-only GPO shadow before Main resumes.
+	fpga_gpo_write_raw(0x80000000);
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return true;
+}
+
+const char *fpga_io_owner_name()
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	const char *name = magik_fpga_owner_name(s_fpga_ownership.snapshot().owner);
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return name;
+}
+
+uint64_t fpga_io_owner_epoch()
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	uint64_t value = s_fpga_ownership.snapshot().epoch;
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return value;
+}
+
+uint64_t fpga_io_blocked_spi_writes()
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	uint64_t value = s_fpga_ownership.snapshot().blocked_spi_writes;
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return value;
+}
+
+uint64_t fpga_io_blocked_gpo_writes()
+{
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	uint64_t value = s_fpga_ownership.snapshot().blocked_gpo_writes;
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return value;
+}
+
+const char *fpga_io_last_blocked_site()
+{
+	static char site[96];
+	pthread_mutex_lock(&s_fpga_ownership_mutex);
+	snprintf(site, sizeof(site), "%s", s_fpga_ownership.snapshot().last_blocked_site);
+	pthread_mutex_unlock(&s_fpga_ownership_mutex);
+	return site;
 }
 
 int fpga_core_id()
@@ -667,8 +778,10 @@ int is_fpga_ready(int quick)
 
 void fpga_spi_en(uint32_t mask, uint32_t en)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpo = fpga_gpo_read() | 0x80000000;
-	fpga_gpo_write(en ? gpo | mask : gpo & ~mask);
+	fpga_gpo_write_raw(en ? gpo | mask : gpo & ~mask);
+	fpga_main_io_end();
 }
 
 void fpga_wait_to_reset()
@@ -687,10 +800,11 @@ void fpga_wait_to_reset()
 
 uint16_t fpga_spi(uint16_t word)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return 0;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE)) | word;
 
-	fpga_gpo_write(gpo);
-	fpga_gpo_write(gpo | SSPI_STROBE);
+	fpga_gpo_write_raw(gpo);
+	fpga_gpo_write_raw(gpo | SSPI_STROBE);
 
 	int gpi;
 	do
@@ -699,12 +813,13 @@ uint16_t fpga_spi(uint16_t word)
 		if (gpi < 0)
 		{
 			printf("GPI[31]==1. FPGA is uninitialized?\n");
+			fpga_main_io_end();
 			fpga_wait_to_reset();
 			return 0;
 		}
 	} while (!(gpi & SSPI_ACK));
 
-	fpga_gpo_write(gpo);
+	fpga_gpo_write_raw(gpo);
 
 	do
 	{
@@ -712,25 +827,31 @@ uint16_t fpga_spi(uint16_t word)
 		if (gpi < 0)
 		{
 			printf("GPI[31]==1. FPGA is uninitialized?\n");
+			fpga_main_io_end();
 			fpga_wait_to_reset();
 			return 0;
 		}
 	} while (gpi & SSPI_ACK);
 
+	fpga_main_io_end();
 	return (uint16_t)gpi;
 }
 
 uint16_t fpga_spi_fast(uint16_t word)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return 0;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE)) | word;
-	fpga_gpo_write(gpo);
-	fpga_gpo_write(gpo | SSPI_STROBE);
-	fpga_gpo_write(gpo);
-	return (uint16_t)fpga_gpi_read();
+	fpga_gpo_write_raw(gpo);
+	fpga_gpo_write_raw(gpo | SSPI_STROBE);
+	fpga_gpo_write_raw(gpo);
+	uint16_t result = (uint16_t)fpga_gpi_read();
+	fpga_main_io_end();
+	return result;
 }
 
 void fpga_spi_fast_block_write(const uint16_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 
@@ -741,11 +862,13 @@ void fpga_spi_fast_block_write(const uint16_t *buf, uint32_t length)
 		fpga_gpo_writeN(gpo);
 		fpga_gpo_writeN(gpo | SSPI_STROBE);
 	}
-	fpga_gpo_write(gpo);
+	fpga_gpo_write_raw(gpo);
+	fpga_main_io_end();
 }
 
 void fpga_spi_fast_block_read(uint16_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t rem = length % 16;
 	length /= 16;
@@ -825,10 +948,12 @@ void fpga_spi_fast_block_read(uint16_t *buf, uint32_t length)
 		fpga_gpo_writeN(gpo);
 		*buf++ = (uint16_t)fpga_gpi_read();
 	}
+	fpga_main_io_end();
 }
 
 void fpga_spi_fast_block_write_8(const uint8_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 	uint32_t rem = length % 16;
@@ -910,11 +1035,13 @@ void fpga_spi_fast_block_write_8(const uint8_t *buf, uint32_t length)
 		fpga_gpo_writeN(gpo | SSPI_STROBE);
 	}
 
-	fpga_gpo_write(gpo);
+	fpga_gpo_write_raw(gpo);
+	fpga_main_io_end();
 }
 
 void fpga_spi_fast_block_read_8(uint8_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t rem = length % 16;
 	length /= 16;
@@ -994,10 +1121,12 @@ void fpga_spi_fast_block_read_8(uint8_t *buf, uint32_t length)
 		fpga_gpo_writeN(gpo);
 		*buf++ = (uint8_t)fpga_gpi_read();
 	}
+	fpga_main_io_end();
 }
 
 void fpga_spi_fast_block_write_be(const uint16_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpoH = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 	uint32_t gpo = gpoH;
 
@@ -1010,11 +1139,13 @@ void fpga_spi_fast_block_write_be(const uint16_t *buf, uint32_t length)
 		fpga_gpo_writeN(gpo);
 		fpga_gpo_writeN(gpo | SSPI_STROBE);
 	}
-	fpga_gpo_write(gpo);
+	fpga_gpo_write_raw(gpo);
+	fpga_main_io_end();
 }
 
 void fpga_spi_fast_block_read_be(uint16_t *buf, uint32_t length)
 {
+	if (!fpga_main_io_begin(MagikFpgaAccess::Spi, __func__)) return;
 	uint32_t gpo = (fpga_gpo_read() & ~(0xFFFF | SSPI_STROBE));
 
 	// should be optimized for speed by compiler automatically
@@ -1025,4 +1156,5 @@ void fpga_spi_fast_block_read_be(uint16_t *buf, uint32_t length)
 		uint16_t tmp = (uint16_t)fpga_gpi_read();
 		*buf++ = (tmp << 8) | (tmp >> 8);
 	}
+	fpga_main_io_end();
 }

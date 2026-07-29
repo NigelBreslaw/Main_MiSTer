@@ -34,6 +34,10 @@ reapplied at their narrow integration seams.
   Dormant launcher mode blocks on the command FIFO and supervised-child exit,
   with a bounded maintenance timeout, so Main does not burn CPU1 or wake at a
   fixed high rate while waiting for Slint or launcher commands.
+- Transfer exclusive FPGA SPI/GPO ownership to the supervised launcher
+  immediately before spawn and restore a safe Main shadow only after that child
+  is reaped. Main's low-level FPGA entrypoints reject and count any attempted
+  cross-owner write instead of corrupting a launcher transaction.
 - Accept explicit handoff commands:
   - `mister_magik_launch <absolute path>` for real `.mra`, `.mgl`, and `.rbf` paths
   - `mister_magik_launch_plan_v1 <encoded-plan>` for MagiK structured catalog rows
@@ -121,6 +125,8 @@ Runtime changes should stay in or immediately around:
   tokens by MRA button index
 - `scheduler.cpp` dormant-mode polling seam
 - `main.cpp` only for the non-scheduler dormant launcher wait hook
+- `fpga_io.cpp` / `fpga_io.h` only for the central launcher ownership fence,
+  safe GPO shadow transfer, and ownership diagnostics
 - narrow command handoff wiring needed to launch through Main
 - `menu.cpp` only for the production latch RBF's logical root-level core-browser
   identity and minimal diagnostic guards
@@ -138,6 +144,14 @@ Build/docs/test changes may touch:
 - `tests/`
 
 ## Implemented Features And Tests
+
+- Exclusive FPGA ownership update: the launcher lifecycle transfers SPI/GPO
+  ownership only after Main has established the black route and prepared the
+  VT/input state. Child exit, kill, handoff, suspend, fork failure, and reboot
+  restore Main ownership before any Main hardware work. `main-status.json`
+  publishes owner, epoch, blocked SPI/GPO counts, and the last blocked site.
+  Host tests cover transfer ordering, stale transfer refusal, blocked access
+  accounting, and restoration.
 
 - Main-owned launcher routing: `video_magik_route_black()` must succeed before
   the supervised child is spawned. Rust no longer receives an `early-black`

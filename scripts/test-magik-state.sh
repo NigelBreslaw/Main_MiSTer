@@ -40,6 +40,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-diag"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/fpga_ownership.cpp" \
+  "$ROOT/tests/fpga_ownership_test.cpp" \
+  -o "$OUT-fpga-ownership"
+"$OUT-fpga-ownership"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_return.cpp" \
   "$ROOT/tests/launcher_return_test.cpp" \
   -o "$OUT-return"
@@ -171,13 +177,20 @@ grep -q 'magik_app_path' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q '/media/fat/mister-magik/experiments' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_artifact_verification_failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'main_sha256' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'platform-v2.manifest' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'legacy_manifest=.*platform-v1.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'platform-v3.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'platform-v[12].manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch_capability_mask.*0x01ff' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch-readiness-report' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'run_launcher_readiness_preflight' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch_startup_tsv valid=1 action=launch-latch-ui reason=preflight-passed' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'compatibility-screen' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'video_magik_route_black' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'mister_magik_supervised_restart_launcher' "$ROOT/support/mister_magik/launcher_command.cpp"
+grep -q 'launcher-restart-token' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'launcher-restart-used' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'mister-magik-scanout"' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'execl(path, path, "early-black"' "$ROOT/support/mister_magik/launcher.cpp"
@@ -199,28 +212,33 @@ awk '
 }
 
 awk '
-  /launcher_spawn_black_route_start/ { in_route=1; failed=0; returned=0 }
-  in_route && /launcher_spawn_black_route_failed/ { failed=1 }
-  in_route && /return MagikLauncherSpawnResult::Failed/ { returned=failed }
-  in_route && /s_pid = fork\(\)/ {
-    if (!returned) exit 1
+  /static MagikLauncherSpawnResult spawn_launcher\(void\)/ && $0 !~ /;/ { spawn_signature=1; next }
+  spawn_signature && /^\{/ {
+    in_spawn=1
+    spawn_signature=0
+    preflight=0
+    owner=0
+  }
+  in_spawn && /run_launcher_readiness_preflight\(path\)/ { preflight=1 }
+  in_spawn && /transfer_fpga_owner_to_launcher/ {
+    if (!preflight) exit 1
+    owner=1
+  }
+  in_spawn && /s_pid = fork\(\)/ {
+    if (!preflight || !owner) exit 1
     checked=1
-    in_route=0
+    in_spawn=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
-  echo "ERROR: Main must not spawn MagiK after the framebuffer route fails" >&2
+  echo "ERROR: Main must complete readiness preflight before FPGA ownership transfer and launcher spawn" >&2
   exit 1
 }
 
 verify_manifest_selection_fixture() {
   local app="$1"
-  local manifest="$app/platform-v2.manifest"
-  local expected_format="mister-magik-platform-v2"
-  if [[ ! -r "$manifest" ]]; then
-    manifest="$app/platform-v1.manifest"
-    expected_format="mister-magik-platform-v1"
-  fi
+  local manifest="$app/platform-v3.manifest"
+  local expected_format="mister-magik-platform-v3"
   [[ -r "$manifest" ]] || return 1
   [[ "$(sed -n 's/^format=//p' "$manifest")" == "$expected_format" ]]
 }
@@ -228,15 +246,18 @@ verify_manifest_selection_fixture() {
 MANIFEST_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/mister-magik-manifest-test.XXXXXX")"
 trap 'rm -rf "$MANIFEST_FIXTURE"' EXIT
 
-printf 'format=mister-magik-platform-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+printf 'format=mister-magik-platform-v3\n' >"$MANIFEST_FIXTURE/platform-v3.manifest"
 verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
 
-rm "$MANIFEST_FIXTURE/platform-v2.manifest"
 printf 'format=mister-magik-platform-v1\n' >"$MANIFEST_FIXTURE/platform-v1.manifest"
-verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
-
-printf 'format=invalid-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+rm "$MANIFEST_FIXTURE/platform-v3.manifest"
 if verify_manifest_selection_fixture "$MANIFEST_FIXTURE"; then
-  echo "ERROR: an invalid v2 manifest must fail closed instead of falling back to v1" >&2
+  echo "ERROR: a legacy manifest must not be accepted" >&2
+  exit 1
+fi
+
+printf 'format=invalid-v3\n' >"$MANIFEST_FIXTURE/platform-v3.manifest"
+if verify_manifest_selection_fixture "$MANIFEST_FIXTURE"; then
+  echo "ERROR: an invalid v3 manifest must fail closed" >&2
   exit 1
 fi

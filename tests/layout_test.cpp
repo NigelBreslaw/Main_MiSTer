@@ -19,10 +19,10 @@ int main(int argc, char **argv)
 	    magik_launcher_relative_path(),
 	    dev ? "mister-magik-dev/mister-magik-fb" : "mister-magik/mister-magik-fb"));
 	char path[256] = {};
-	magik_app_path(path, sizeof(path), "platform-v2.manifest");
+	magik_app_path(path, sizeof(path), "platform-v3.manifest");
 	assert(!strcmp(
 	    path,
-	    dev ? "/media/fat/mister-magik-dev/platform-v2.manifest"
-	        : "/media/fat/mister-magik/platform-v2.manifest"));
+	    dev ? "/media/fat/mister-magik-dev/platform-v3.manifest"
+	        : "/media/fat/mister-magik/platform-v3.manifest"));
 	return 0;
 }

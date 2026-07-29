@@ -53,6 +53,7 @@ const char *magik_launcher_command_type_name(MagikLauncherCommandType type)
 	case MagikLauncherCommandType::Suspend: return "Suspend";
 	case MagikLauncherCommandType::Resume: return "Resume";
 	case MagikLauncherCommandType::RestartLauncher: return "RestartLauncher";
+	case MagikLauncherCommandType::SupervisedRestartLauncher: return "SupervisedRestartLauncher";
 	case MagikLauncherCommandType::HdmiPowerCycle: return "HdmiPowerCycle";
 	case MagikLauncherCommandType::VideoAdjust: return "VideoAdjust";
 	case MagikLauncherCommandType::VideoReinit: return "VideoReinit";
@@ -262,6 +263,11 @@ bool magik_launcher_parse_command(const char *line, MagikLauncherCommand *cmd)
 	if (!strcmp(line, "mister_magik_restart_launcher"))
 	{
 		cmd->type = MagikLauncherCommandType::RestartLauncher;
+		return true;
+	}
+	if (!strcmp(line, "mister_magik_supervised_restart_launcher"))
+	{
+		cmd->type = MagikLauncherCommandType::SupervisedRestartLauncher;
 		return true;
 	}
 	if (!strcmp(line, "mister_magik_hdmi_power_cycle"))

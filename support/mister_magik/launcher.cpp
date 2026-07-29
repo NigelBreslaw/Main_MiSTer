@@ -35,14 +35,15 @@
 #include "video.h"
 #include "cfg.h"
 
-extern int video_magik_route_black();
-
 static const char s_script_path[] = "/tmp/mister_magik_launcher";
 static const char s_log_path[] = "/tmp/mister-magik-main.log";
 static const char s_status_dir[] = "/tmp/mister-magik";
 static const char s_status_path[] = "/tmp/mister-magik/main-status.json";
 static const char s_events_path[] = "/tmp/mister-magik/events.jsonl";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
+static const char s_restart_token_path[] = "/tmp/mister-magik/launcher-restart-token";
+static const char s_restart_used_path[] = "/tmp/mister-magik/launcher-restart-used";
+static const char s_boot_id_path[] = "/proc/sys/kernel/random/boot_id";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
 static const char *resolved_runtime_output()
 {
@@ -63,19 +64,26 @@ static const char *artifact_verify_command()
 	snprintf(command, sizeof(command),
 	"set -e; "
 	"app=%s; "
-	"manifest=$app/platform-v2.manifest; "
-	"legacy_manifest=$app/platform-v1.manifest; "
-	"if test -r \"$manifest\"; then manifest_format=mister-magik-platform-v2; else manifest=$legacy_manifest; manifest_format=mister-magik-platform-v1; fi; "
+	"manifest=$app/platform-v3.manifest; "
 	"get() { value=$(sed -n \"s/^$1=//p\" \"$manifest\"); test -n \"$value\"; test \"$(grep -c \"^$1=\" \"$manifest\")\" -eq 1; printf %%s \"$value\"; }; "
 	"main=%s; "
 	"gui=$app/mister-magik-fb; "
-	"catalog_builder=$app/mister-magik-catalog-builder; "
 	"module=$app/mister_magik_scanout_slots.ko; "
 	"module_meta=$app/mister_magik_scanout_slots.metadata.txt; "
 	"rbf=$app/fpga/menu-magik-vblank-latch.rbf; "
 	"rbf_meta=$app/fpga/menu-magik-vblank-latch.metadata.txt; "
 	"test -r \"$manifest\" -a -r \"$main\" -a -r \"$gui\" -a -r \"$module\" -a -r \"$module_meta\" -a -r \"$rbf\" -a -r \"$rbf_meta\"; "
-	"test \"$(get format)\" = \"$manifest_format\"; "
+	"test \"$(get format)\" = mister-magik-platform-v3; "
+	"release=$(get platform_release); "
+	"release_number=$(get platform_release_number); "
+	"bundle_id=$(get platform_bundle_id); "
+	"candidate_id=$(get qualification_candidate_id); "
+	"test \"$release\" = \"platform-v0.$release_number\"; "
+	"case \"$release_number\" in ''|*[!0-9]*|0) exit 1;; esac; "
+	"test ${#bundle_id} -eq 64 -a ${#candidate_id} -eq 64; "
+	"case \"$bundle_id$candidate_id\" in *[!0-9a-f]*) exit 1;; esac; "
+	"test \"$(get latch_protocol_version)\" = 4; "
+	"test \"$(get latch_capability_mask)\" = 0x01ff; "
 	"test \"$(get main_path)\" = \"$main\"; "
 	"test \"$(get gui_path)\" = \"$gui\"; "
 	"test \"$(get scanout_module_path)\" = \"$module\"; "
@@ -97,7 +105,6 @@ static const char *artifact_verify_command()
 	"case \"$main_hash$gui_hash$module_hash$module_meta_hash$rbf_hash$rbf_meta_hash$contract$main_revision$magik_revision$menu_revision\" in *[!0-9a-f]*) exit 1;; esac; "
 	"test \"$(sha256sum \"$main\" | awk '{print $1}')\" = \"$main_hash\"; "
 	"test \"$(sha256sum \"$gui\" | awk '{print $1}')\" = \"$gui_hash\"; "
-	"if test \"$manifest_format\" = mister-magik-platform-v1; then catalog_builder_hash=$(get catalog_builder_sha256); test \"$(get catalog_builder_path)\" = \"$catalog_builder\"; test -r \"$catalog_builder\"; test ${#catalog_builder_hash} -eq 64; case \"$catalog_builder_hash\" in *[!0-9a-f]*) exit 1;; esac; test \"$(sha256sum \"$catalog_builder\" | awk '{print $1}')\" = \"$catalog_builder_hash\"; fi; "
 	"test \"$(sha256sum \"$module\" | awk '{print $1}')\" = \"$module_hash\"; "
 	"test \"$(sha256sum \"$module_meta\" | awk '{print $1}')\" = \"$module_meta_hash\"; "
 	"test \"$(sha256sum \"$rbf\" | awk '{print $1}')\" = \"$rbf_hash\"; "
@@ -106,7 +113,9 @@ static const char *artifact_verify_command()
 	"grep -qx \"platform_contract_sha256=$contract\" \"$rbf_meta\"; "
 	"grep -qx \"module_sha256=$module_hash\" \"$module_meta\"; "
 	"grep -qx \"rbf_sha256=$rbf_hash\" \"$rbf_meta\"; "
-	"grep -qx \"source_commit=$menu_revision\" \"$rbf_meta\"",
+	"grep -qx \"source_commit=$menu_revision\" \"$rbf_meta\"; "
+	"grep -qx \"latch_protocol_version=4\" \"$rbf_meta\"; "
+	"grep -qx \"latch_capability_mask=0x01ff\" \"$rbf_meta\"",
 	magik_app_dir(), magik_main_path());
 	return command;
 }
@@ -182,6 +191,42 @@ static void clear_input_policy_marker(void)
 static void eventf(const char *event, const char *fmt, ...);
 static void set_status_string(char *dst, size_t len, const char *fmt, ...);
 
+static bool transfer_fpga_owner_to_launcher(const char *site)
+{
+	if (!fpga_io_transfer_to_magik(site))
+	{
+		mister_magik_record_invariant(
+			"fpga_owner_transfer_failed",
+			site ? site : "launcher");
+		return false;
+	}
+	eventf(
+		"fpga_owner_transferred",
+		"owner=%s epoch=%llu site=%s",
+		fpga_io_owner_name(),
+		(unsigned long long)fpga_io_owner_epoch(),
+		site ? site : "launcher");
+	return true;
+}
+
+static void restore_fpga_owner_to_main(const char *site)
+{
+	if (!strcmp(fpga_io_owner_name(), "main")) return;
+	if (!fpga_io_restore_to_main(site))
+	{
+		mister_magik_record_invariant(
+			"fpga_owner_restore_failed",
+			site ? site : "main");
+		return;
+	}
+	eventf(
+		"fpga_owner_transferred",
+		"owner=%s epoch=%llu site=%s",
+		fpga_io_owner_name(),
+		(unsigned long long)fpga_io_owner_epoch(),
+		site ? site : "main");
+}
+
 static void ensure_status_dir(void)
 {
 	mkdir(s_status_dir, 0755);
@@ -200,6 +245,58 @@ static void read_trimmed(const char *path, char *buf, size_t len)
 			buf[--n] = 0;
 	}
 	fclose(f);
+}
+
+static void initialize_supervised_restart_token()
+{
+	ensure_status_dir();
+	char boot_id[64];
+	char used_boot_id[64];
+	read_trimmed(s_boot_id_path, boot_id, sizeof(boot_id));
+	read_trimmed(s_restart_used_path, used_boot_id, sizeof(used_boot_id));
+	if (!boot_id[0]) return;
+	if (!strcmp(boot_id, used_boot_id))
+	{
+		unlink(s_restart_token_path);
+		return;
+	}
+	unlink(s_restart_used_path);
+	FILE *token = fopen(s_restart_token_path, "w");
+	if (!token) return;
+	fprintf(token, "%s\n", boot_id);
+	fclose(token);
+	chmod(s_restart_token_path, 0600);
+}
+
+static bool consume_supervised_restart_token()
+{
+	char boot_id[64];
+	char token_boot_id[64];
+	read_trimmed(s_boot_id_path, boot_id, sizeof(boot_id));
+	read_trimmed(s_restart_token_path, token_boot_id, sizeof(token_boot_id));
+	if (!boot_id[0] || strcmp(boot_id, token_boot_id))
+		return false;
+	int used = open(s_restart_used_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	if (used < 0)
+		return false;
+	if (write(used, boot_id, strlen(boot_id)) < 0) {}
+	if (write(used, "\n", 1) < 0) {}
+	close(used);
+	unlink(s_restart_token_path);
+	return true;
+}
+
+static bool supervised_restart_available()
+{
+	char boot_id[64];
+	char token_boot_id[64];
+	char used_boot_id[64];
+	read_trimmed(s_boot_id_path, boot_id, sizeof(boot_id));
+	read_trimmed(s_restart_token_path, token_boot_id, sizeof(token_boot_id));
+	read_trimmed(s_restart_used_path, used_boot_id, sizeof(used_boot_id));
+	return boot_id[0] &&
+	       !strcmp(boot_id, token_boot_id) &&
+	       strcmp(boot_id, used_boot_id);
 }
 
 static void json_escape(FILE *f, const char *s)
@@ -589,6 +686,7 @@ static void restore_stock_menu_after_failed_spawn(void)
 		return;
 	}
 
+	restore_fpga_owner_to_main("failed-spawn");
 	s_spawn_pending = false;
 	transition(MagikLauncherEvent::ResetToUnconfigured);
 	input_switch(1);
@@ -601,7 +699,11 @@ static void restore_stock_menu_after_failed_spawn(void)
 
 static void stop_launcher_child(void)
 {
-	if (!s_pid) return;
+	if (!s_pid)
+	{
+		restore_fpga_owner_to_main("no-child");
+		return;
+	}
 	pid_t pid = s_pid;
 	kill(-pid, SIGTERM);
 	kill(pid, SIGTERM);
@@ -610,6 +712,7 @@ static void stop_launcher_child(void)
 		if (waitpid(pid, NULL, WNOHANG) == pid)
 		{
 			s_pid = 0;
+			restore_fpga_owner_to_main("child-reaped");
 			return;
 		}
 		usleep(10000);
@@ -618,6 +721,7 @@ static void stop_launcher_child(void)
 	kill(pid, SIGKILL);
 	waitpid(pid, NULL, 0);
 	s_pid = 0;
+	restore_fpga_owner_to_main("child-killed");
 }
 
 static void complete_handoff_to_game(const char *path, bool external = false)
@@ -784,6 +888,7 @@ static bool begin_reboot_lockdown(const char *method)
 	transition(MagikLauncherEvent::RebootRequested);
 	s_spawn_pending = false;
 	close_command_fifo();
+	stop_launcher_child();
 	user_io_osd_key_enable(0);
 	OsdDisable();
 	input_switch(0);
@@ -1166,6 +1271,33 @@ static void process_command_line(const char *line)
 		}
 		return;
 	}
+	if (cmd.type == MagikLauncherCommandType::SupervisedRestartLauncher)
+	{
+		if (magik_launcher_restart_action(s_state) == MagikLauncherRestartAction::Reject)
+		{
+			reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+			return;
+		}
+		if (!consume_supervised_restart_token())
+		{
+			mister_magik_command_reply("rejected supervised-restart-token-unavailable");
+			eventf(
+			    "launcher_supervised_restart_rejected",
+			    "reason=token-unavailable action=return-to-main");
+			if (s_state == MagikLauncherState::LauncherActive)
+				complete_handoff_to_menu();
+			return;
+		}
+		s_launcher_active_reply_pending = true;
+		eventf("launcher_supervised_restart_accepted", "token=consumed");
+		restart_launcher();
+		if (s_last_restart_error[0])
+		{
+			s_launcher_active_reply_pending = false;
+			reply_commandf("error %s", s_last_restart_error);
+		}
+		return;
+	}
 	if (cmd.type == MagikLauncherCommandType::HdmiPowerCycle)
 	{
 		hdmi_power_cycle();
@@ -1282,6 +1414,111 @@ static void reset_launcher_tty(void)
 	}
 }
 
+static bool wait_for_preflight_child(pid_t pid, const char *stage)
+{
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0)
+	{
+		if (errno == EINTR) continue;
+		eventf("launcher_preflight_failed", "stage=%s wait_errno=%d", stage, errno);
+		return false;
+	}
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+	{
+		eventf(
+		    "launcher_preflight_failed",
+		    "stage=%s exited=%d status=%d signal=%d",
+		    stage,
+		    WIFEXITED(status) ? 1 : 0,
+		    WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+		    WIFSIGNALED(status) ? WTERMSIG(status) : -1);
+		return false;
+	}
+	return true;
+}
+
+static bool run_launcher_readiness_preflight(const char *path)
+{
+	int log_fd = open(
+	    "/tmp/mister-magik-slint.log",
+	    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+	    0644);
+	if (log_fd < 0)
+	{
+		eventf("launcher_preflight_failed", "stage=log-open errno=%d", errno);
+		return false;
+	}
+	close(log_fd);
+
+	if (system(artifact_verify_command()) != 0)
+	{
+		eventf("launcher_preflight_failed", "stage=artifact-identity");
+		return false;
+	}
+
+	if (access("/dev/mister-magik-scanout-slots", R_OK | W_OK) != 0)
+	{
+		const char *module = layout_path("mister_magik_scanout_slots.ko");
+		pid_t module_pid = fork();
+		if (module_pid < 0)
+		{
+			eventf("launcher_preflight_failed", "stage=module-fork errno=%d", errno);
+			return false;
+		}
+		if (!module_pid)
+		{
+			int fd = open(
+			    "/tmp/mister-magik-slint.log",
+			    O_WRONLY | O_CREAT | O_APPEND,
+			    0644);
+			if (fd >= 0)
+			{
+				dup2(fd, STDOUT_FILENO);
+				dup2(fd, STDERR_FILENO);
+				close(fd);
+			}
+			execl("/sbin/insmod", "insmod", module, (char *)NULL);
+			_exit(127);
+		}
+		if (!wait_for_preflight_child(module_pid, "scanout-module"))
+			return false;
+	}
+	if (access("/dev/mister-magik-scanout-slots", R_OK | W_OK) != 0)
+	{
+		eventf("launcher_preflight_failed", "stage=scanout-device");
+		return false;
+	}
+
+	pid_t readiness_pid = fork();
+	if (readiness_pid < 0)
+	{
+		eventf("launcher_preflight_failed", "stage=readiness-fork errno=%d", errno);
+		return false;
+	}
+	if (!readiness_pid)
+	{
+		int fd = open(
+		    "/tmp/mister-magik-slint.log",
+		    O_WRONLY | O_CREAT | O_APPEND,
+		    0644);
+		if (fd >= 0)
+		{
+			dup2(fd, STDOUT_FILENO);
+			dup2(fd, STDERR_FILENO);
+			close(fd);
+		}
+		execl(path, path, "latch-readiness-report", (char *)NULL);
+		_exit(127);
+	}
+	if (!wait_for_preflight_child(readiness_pid, "latch-readiness"))
+		return false;
+
+	eventf(
+	    "launcher_preflight_passed",
+	    "protocol=4 capabilities=0x01ff identity=verified");
+	return true;
+}
+
 static bool write_launcher_script(const char *path)
 {
 	FILE *f = fopen(s_script_path, "w");
@@ -1300,20 +1537,12 @@ static bool write_launcher_script(const char *path)
 	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
 	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
 	        "export MISTER_MAGIK_DISPLAY_CONFIRM_UI=%d\n"
-	        ": >/tmp/mister-magik-slint.log\n"
-	        "if %s && [ -f \"%s\" ] && ! grep -q '^mister_magik_scanout_slots ' /proc/modules 2>/dev/null; then\n"
-	        "  insmod \"%s\" >>/tmp/mister-magik-slint.log 2>&1 || true\n"
-	        "fi\n"
 	        "if [ -e /dev/mister-magik-scanout-slots ]; then\n"
 	        "  echo 'scanout-slots-supervisor=device-ready' >>/tmp/mister-magik-slint.log\n"
 	        "else\n"
 	        "  echo 'scanout-slots-supervisor=device-missing' >>/tmp/mister-magik-slint.log\n"
 	        "fi\n"
-	        "if ! \"$MISTER_MAGIK_PATH\" latch-readiness-report >>/tmp/mister-magik-slint.log 2>&1; then\n"
-	        "  echo 'latch_startup_tsv valid=0 action=compatibility-screen reason=readiness-probe-failed' >>/tmp/mister-magik-slint.log\n"
-	        "else\n"
-	        "  echo 'latch_startup_tsv valid=1 action=launch-latch-ui reason=ready' >>/tmp/mister-magik-slint.log\n"
-	        "fi\n"
+	        "echo 'latch_startup_tsv valid=1 action=launch-latch-ui reason=preflight-passed' >>/tmp/mister-magik-slint.log\n"
 	        "printf '\\033[0m\\033[?25l\\033[37m\\033[40m\\033[2J\\033[H'\n"
 	        "exec \"$MISTER_MAGIK_PATH\" ui launcher 0 >>/tmp/mister-magik-slint.log 2>&1\n",
 	        return_spawn ? 1 : 0,
@@ -1321,10 +1550,7 @@ static bool write_launcher_script(const char *path)
 	        layout_path("launcher.env"),
 	        resolved_runtime_output(),
 	        configured_display_mode(),
-	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0,
-	        artifact_verify_command(),
-	        layout_path("mister_magik_scanout_slots.ko"),
-	        layout_path("mister_magik_scanout_slots.ko"));
+	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0);
 	fclose(f);
 	chmod(s_script_path, 0755);
 	eventf("launcher_script_written", "script=%s path=%s return_spawn=%d", s_script_path, path ? path : "", return_spawn ? 1 : 0);
@@ -1351,6 +1577,17 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
+	if (!run_launcher_readiness_preflight(path))
+	{
+		set_status_string(
+		    s_last_spawn_error,
+		    sizeof(s_last_spawn_error),
+		    "preflight_failed path=%s",
+		    path);
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
 	if (!write_launcher_script(path))
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
@@ -1363,13 +1600,11 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 	OsdDisable();
-	eventf("launcher_spawn_black_route_start", "state=%s", magik_launcher_state_name(s_state));
-	if (video_magik_route_black())
-		eventf("launcher_spawn_black_route_completed", "source=main format=565");
-	else
+	video_chvt(s_vt);
+	input_switch(0);
+	if (!transfer_fpga_owner_to_launcher("spawn-launcher"))
 	{
-		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "black_route_failed source=main");
-		eventf("launcher_spawn_black_route_failed", "source=main");
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fpga_owner_transfer_failed");
 		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
@@ -1381,6 +1616,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fork_failed errno=%d", errno);
 		eventf("launcher_fork_failed", "errno=%d", errno);
 		s_pid = 0;
+		restore_fpga_owner_to_main("fork-failed");
 		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
@@ -1395,8 +1631,6 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 
 	s_last_spawn_error[0] = 0;
 	log_msg("spawned pid=%d path=%s", s_pid, path);
-	video_chvt(s_vt);
-	input_switch(0);
 	transition(MagikLauncherEvent::ChildSpawned);
 	finish_pending_launcher_reply(MagikLauncherSpawnResult::Spawned);
 	return MagikLauncherSpawnResult::Spawned;
@@ -1434,6 +1668,7 @@ bool mister_magik_launcher_main_framebuffer_suppressed(void)
 void mister_magik_launcher_begin_boot_lockdown(void)
 {
 	if (!mister_magik_launcher_configured()) return;
+	initialize_supervised_restart_token();
 	if (s_state == MagikLauncherState::Unconfigured)
 		transition(MagikLauncherEvent::Configured);
 	if (s_state != MagikLauncherState::BootingMain) return;
@@ -1479,6 +1714,7 @@ void mister_magik_status_write(void)
 	fprintf(f, "\"deploy_locked\":%s,", deploy_lock_active() ? "true" : "false");
 	fprintf(f, "\"crash_count\":%lu,", s_crash_count);
 	fprintf(f, "\"restart_count\":%lu,", s_restart_count);
+	fprintf(f, "\"supervised_restart_available\":%s,", supervised_restart_available() ? "true" : "false");
 	fprintf(f, "\"last_crash_reason\":");
 	json_escape(f, s_last_crash_reason);
 	fprintf(f, ",\"last_crash_report\":");
@@ -1498,6 +1734,13 @@ void mister_magik_status_write(void)
 	json_escape(f, fb_mode[0] ? fb_mode : "unknown");
 	fprintf(f, ",\"scanout_slots_module_loaded\":%s", access("/sys/module/mister_magik_scanout_slots", F_OK) == 0 ? "true" : "false");
 	fprintf(f, ",\"scanout_slots_device_ready\":%s", access("/dev/mister-magik-scanout-slots", R_OK | W_OK) == 0 ? "true" : "false");
+	fprintf(f, ",\"fpga_owner\":");
+	json_escape(f, fpga_io_owner_name());
+	fprintf(f, ",\"fpga_owner_epoch\":%llu", (unsigned long long)fpga_io_owner_epoch());
+	fprintf(f, ",\"blocked_spi_writes\":%llu", (unsigned long long)fpga_io_blocked_spi_writes());
+	fprintf(f, ",\"blocked_gpo_writes\":%llu", (unsigned long long)fpga_io_blocked_gpo_writes());
+	fprintf(f, ",\"last_blocked_fpga_site\":");
+	json_escape(f, fpga_io_last_blocked_site());
 	fprintf(f, ",\"invariant_count\":%lu", s_invariant_count);
 	fprintf(f, ",\"last_invariant_kind\":");
 	json_escape(f, s_last_invariant_kind);
@@ -1513,14 +1756,10 @@ void mister_magik_launcher_route_early_black(void)
 	if (s_state == MagikLauncherState::Unconfigured)
 		transition(MagikLauncherEvent::Configured);
 
-	eventf("early_black_main_route_start", "state=%s", magik_launcher_state_name(s_state));
-	if (video_magik_route_black())
-	{
-		eventf("early_black_route_frame_copied", "source=main format=565");
-		eventf("early_black_route_completed", "source=main format=565");
-		return;
-	}
-	eventf("early_black_main_route_failed", "fallback=none action=defer-to-launch");
+	eventf(
+	    "early_display_preserved",
+	    "state=%s action=wait-for-qualified-latch",
+	    magik_launcher_state_name(s_state));
 }
 
 void mister_magik_launcher_enter_after_menu_init(void)
@@ -1598,6 +1837,7 @@ void mister_magik_launcher_poll(void)
 		{
 			pid_t old_pid = s_pid;
 			s_pid = 0;
+			restore_fpga_owner_to_main("child-exited");
 			if (s_state == MagikLauncherState::LauncherRebooting)
 			{
 				transition(MagikLauncherEvent::ChildExitedExpectedly);

@@ -177,8 +177,9 @@ grep -q 'magik_app_path' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q '/media/fat/mister-magik/experiments' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_artifact_verification_failed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'main_sha256' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'platform-v2.manifest' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'legacy_manifest=.*platform-v1.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'platform-v3.manifest' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'platform-v[12].manifest' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'latch_capability_mask.*0x01ff' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'platform_contract_sha256' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'scanout_slots_device_ready' "$ROOT/support/mister_magik/launcher.cpp"
@@ -221,12 +222,8 @@ awk '
 
 verify_manifest_selection_fixture() {
   local app="$1"
-  local manifest="$app/platform-v2.manifest"
-  local expected_format="mister-magik-platform-v2"
-  if [[ ! -r "$manifest" ]]; then
-    manifest="$app/platform-v1.manifest"
-    expected_format="mister-magik-platform-v1"
-  fi
+  local manifest="$app/platform-v3.manifest"
+  local expected_format="mister-magik-platform-v3"
   [[ -r "$manifest" ]] || return 1
   [[ "$(sed -n 's/^format=//p' "$manifest")" == "$expected_format" ]]
 }
@@ -234,15 +231,18 @@ verify_manifest_selection_fixture() {
 MANIFEST_FIXTURE="$(mktemp -d "${TMPDIR:-/tmp}/mister-magik-manifest-test.XXXXXX")"
 trap 'rm -rf "$MANIFEST_FIXTURE"' EXIT
 
-printf 'format=mister-magik-platform-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+printf 'format=mister-magik-platform-v3\n' >"$MANIFEST_FIXTURE/platform-v3.manifest"
 verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
 
-rm "$MANIFEST_FIXTURE/platform-v2.manifest"
 printf 'format=mister-magik-platform-v1\n' >"$MANIFEST_FIXTURE/platform-v1.manifest"
-verify_manifest_selection_fixture "$MANIFEST_FIXTURE"
-
-printf 'format=invalid-v2\n' >"$MANIFEST_FIXTURE/platform-v2.manifest"
+rm "$MANIFEST_FIXTURE/platform-v3.manifest"
 if verify_manifest_selection_fixture "$MANIFEST_FIXTURE"; then
-  echo "ERROR: an invalid v2 manifest must fail closed instead of falling back to v1" >&2
+  echo "ERROR: a legacy manifest must not be accepted" >&2
+  exit 1
+fi
+
+printf 'format=invalid-v3\n' >"$MANIFEST_FIXTURE/platform-v3.manifest"
+if verify_manifest_selection_fixture "$MANIFEST_FIXTURE"; then
+  echo "ERROR: an invalid v3 manifest must fail closed" >&2
   exit 1
 fi

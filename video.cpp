@@ -3617,112 +3617,21 @@ static void fb_write_module_params()
 	});
 }
 
-static int magik_aligned_stride_565(int width)
+int video_magik_enter_bootstrap_black()
 {
-	return ((width * 2) + 15) & ~15;
-}
-
-static int magik_write_fb_mode_565(int width, int height, int stride)
-{
-	FILE *fp = fopen("/sys/module/MiSTer_fb/parameters/mode", "wt");
-	if (!fp)
-	{
-		printf("mister_magik: failed to open fb mode: %s\n", strerror(errno));
-		return 0;
-	}
-	fprintf(fp, "%d %d %d %d %d\n", 565, 1, width, height, stride);
-	fclose(fp);
-	return 1;
-}
-
-static int magik_clear_fb0(size_t bytes)
-{
-	int fd = open("/dev/fb0", O_WRONLY | O_CLOEXEC);
-	if (fd < 0)
-	{
-		printf("mister_magik: failed to open /dev/fb0: %s\n", strerror(errno));
-		return 0;
-	}
-
-	char zeros[4096] = {};
-	size_t remaining = bytes;
-	while (remaining)
-	{
-		size_t chunk = remaining < sizeof(zeros) ? remaining : sizeof(zeros);
-		ssize_t n = write(fd, zeros, chunk);
-		if (n < 0)
-		{
-			printf("mister_magik: failed to clear /dev/fb0: %s\n", strerror(errno));
-			close(fd);
-			return 0;
-		}
-		if (!n) break;
-		remaining -= (size_t)n;
-	}
-	close(fd);
-	return remaining == 0;
-}
-
-int video_magik_route_black()
-{
-	int scan_w = v_cur.item[1];
-	int scan_h = v_cur.item[5];
-	if (scan_w <= 0 || scan_h <= 0)
-	{
-		scan_w = 1920;
-		scan_h = 1080;
-	}
-
-	int width = scan_w;
-	int height = scan_h;
-	if (scan_w >= 1600 || scan_h >= 900)
-	{
-		width = scan_w / 2;
-		height = scan_h / 2;
-	}
-	if (width <= 0 || height <= 0 || width * height > FB_SIZE)
-	{
-		printf("mister_magik: invalid black route geometry fb=%dx%d scan=%dx%d\n", width, height, scan_w, scan_h);
-		return 0;
-	}
-
-	int stride = magik_aligned_stride_565(width);
-	if (!magik_write_fb_mode_565(width, height, stride))
-		return 0;
-	if (!magik_clear_fb0((size_t)stride * (size_t)height))
-		return 0;
-
-	uint32_t fb_addr = FB_ADDR + 4096;
-	int xoff = 0;
-	int yoff = 0;
-	int right_guard = scan_w > 1 ? 1 : 0;
-
 	DisableIO();
 	int res = spi_uio_cmd_cont(UIO_SET_FBUF);
-	if (!res)
-	{
-		DisableIO();
-		printf("mister_magik: core does not support black framebuffer route\n");
-		return 0;
-	}
-
-	spi_w((uint16_t)(FB_EN | FB_FMT_RxB | FB_FMT_565));
-	spi_w((uint16_t)fb_addr);
-	spi_w(fb_addr >> 16);
-	spi_w(width);
-	spi_w(height);
-	spi_w(xoff);
-	spi_w(xoff + scan_w - 1 - right_guard);
-	spi_w(yoff);
-	spi_w(yoff + scan_h - 1);
-	spi_w(stride);
+	spi_w(0);
 	DisableIO();
 
-	if (cfg.direct_video) set_vga_fb(1);
-	input_switch(0);
-	fb_enabled = 1;
+	fb_enabled = 0;
 	fb_num = 0;
-	printf("mister_magik: black routed 565 fb=%dx%d scan=%dx%d stride=%d\n", width, height, scan_w, scan_h, stride);
+	if (!res)
+	{
+		printf("mister_magik: bootstrap framebuffer disable was not acknowledged\n");
+		return 0;
+	}
+	printf("mister_magik: bootstrap framebuffer route disabled\n");
 	return 1;
 }
 

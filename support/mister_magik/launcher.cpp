@@ -1,4 +1,5 @@
 #include "launcher.h"
+#include "bootstrap_sequence.h"
 #include "launcher_state.h"
 #include "launcher_reply.h"
 #include "launcher_command.h"
@@ -150,6 +151,11 @@ static char s_last_crash_report_id[128] = "";
 static char s_last_crash_kind[64] = "";
 static char s_last_restart_error[256] = "";
 static char s_last_spawn_error[256] = "";
+static char s_bootstrap_phase[48] = "not-entered";
+static char s_bootstrap_source[64] = "none";
+static unsigned long s_bootstrap_phase_ms = 0;
+static unsigned long s_bootstrap_black_count = 0;
+static MagikBootstrapSequence s_bootstrap_sequence;
 
 struct DisplayTransaction
 {
@@ -190,6 +196,22 @@ static void clear_input_policy_marker(void)
 
 static void eventf(const char *event, const char *fmt, ...);
 static void set_status_string(char *dst, size_t len, const char *fmt, ...);
+
+static void set_bootstrap_phase(const char *phase, const char *source)
+{
+	set_status_string(
+	    s_bootstrap_phase,
+	    sizeof(s_bootstrap_phase),
+	    "%s",
+	    phase ? phase : "unknown");
+	set_status_string(
+	    s_bootstrap_source,
+	    sizeof(s_bootstrap_source),
+	    "%s",
+	    source ? source : "unknown");
+	s_bootstrap_phase_ms = GetTimer(0);
+	mister_magik_status_write();
+}
 
 static bool transfer_fpga_owner_to_launcher(const char *site)
 {
@@ -689,12 +711,56 @@ static void restore_stock_menu_after_failed_spawn(void)
 	restore_fpga_owner_to_main("failed-spawn");
 	s_spawn_pending = false;
 	transition(MagikLauncherEvent::ResetToUnconfigured);
+	if (!video_magik_enter_bootstrap_black())
+		eventf("bootstrap_black_restore_unavailable", "fallback=stock-osd");
+	if (s_bootstrap_sequence.stage() == MagikBootstrapStage::Failed &&
+	    !s_bootstrap_sequence.recover_stock_osd())
+		mister_magik_record_invariant(
+		    "bootstrap_stock_osd_recovery_rejected",
+		    magik_bootstrap_failure_name(s_bootstrap_sequence.failure()));
 	input_switch(1);
 	user_io_osd_key_enable(1);
-	video_fb_enable(0);
-	video_menu_bg(user_io_status_get("[3:1]"));
 	OsdEnable(DISABLE_KEYBOARD);
+	set_bootstrap_phase("failed-stock-osd", "failed-spawn");
 	eventf("launcher_spawn_restored_stock_menu", "child=none");
+}
+
+static bool enter_bootstrap_black(const char *source)
+{
+	bool main_owns_fpga = !strcmp(fpga_io_owner_name(), "main");
+	if (!s_bootstrap_sequence.begin(main_owns_fpga, s_pid != 0))
+	{
+		const char *kind = s_pid
+		    ? "bootstrap_black_with_live_child"
+		    : "bootstrap_black_without_main_ownership";
+		mister_magik_record_invariant(kind, source ? source : "unknown");
+		set_bootstrap_phase("black-refused-owner", source);
+		return false;
+	}
+
+	user_io_osd_key_enable(0);
+	OsdDisable();
+	input_switch(0);
+	bool acknowledged = video_magik_enter_bootstrap_black() != 0;
+	if (!s_bootstrap_sequence.black_completed(acknowledged))
+	{
+		eventf(
+		    "bootstrap_black_failed",
+		    "source=%s reason=framebuffer-disable-unsupported",
+		    source ? source : "unknown");
+		set_bootstrap_phase("black-failed", source);
+		return false;
+	}
+
+	s_bootstrap_black_count++;
+	set_bootstrap_phase("black-entered", source);
+	eventf(
+	    "bootstrap_black_entered",
+	    "source=%s count=%lu owner=%s child=none",
+	    source ? source : "unknown",
+	    s_bootstrap_black_count,
+	    fpga_io_owner_name());
+	return true;
 }
 
 static void stop_launcher_child(void)
@@ -1569,6 +1635,16 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	char path[2100];
 	strncpy(path, getFullPath(magik_launcher_relative_path()), sizeof(path) - 1);
 	path[sizeof(path) - 1] = '\0';
+	if (!enter_bootstrap_black("supervised-spawn"))
+	{
+		set_status_string(
+		    s_last_spawn_error,
+		    sizeof(s_last_spawn_error),
+		    "bootstrap_black_failed");
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
 	if (!FileExists(magik_launcher_relative_path(), 0))
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
@@ -1577,7 +1653,8 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
-	if (!run_launcher_readiness_preflight(path))
+	bool preflight_passed = run_launcher_readiness_preflight(path);
+	if (!s_bootstrap_sequence.preflight_completed(preflight_passed))
 	{
 		set_status_string(
 		    s_last_spawn_error,
@@ -1588,6 +1665,11 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
+	set_bootstrap_phase("preflight-complete", "supervised-spawn");
+	eventf(
+	    "bootstrap_preflight_completed",
+	    "source=supervised-spawn owner=%s child=none",
+	    fpga_io_owner_name());
 	if (!write_launcher_script(path))
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
@@ -1602,17 +1684,25 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	OsdDisable();
 	video_chvt(s_vt);
 	input_switch(0);
-	if (!transfer_fpga_owner_to_launcher("spawn-launcher"))
+	bool ownership_transferred = transfer_fpga_owner_to_launcher("spawn-launcher");
+	if (!s_bootstrap_sequence.ownership_transferred(ownership_transferred))
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fpga_owner_transfer_failed");
 		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
+	set_bootstrap_phase("ownership-transferred", "supervised-spawn");
+	eventf(
+	    "bootstrap_ownership_transferred",
+	    "source=supervised-spawn owner=%s epoch=%llu child=none",
+	    fpga_io_owner_name(),
+	    (unsigned long long)fpga_io_owner_epoch());
 
 	s_pid = fork();
 	if (s_pid < 0)
 	{
+		(void)s_bootstrap_sequence.child_spawned(false);
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "fork_failed errno=%d", errno);
 		eventf("launcher_fork_failed", "errno=%d", errno);
 		s_pid = 0;
@@ -1628,10 +1718,31 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l", s_script_path, "-i", "--nohostname", "-L", s_tty, "linux", NULL);
 		_exit(127);
 	}
+	if (!s_bootstrap_sequence.child_spawned(true))
+	{
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "bootstrap_spawn_order_failed");
+		mister_magik_record_invariant(
+		    "bootstrap_spawn_order_failed",
+		    magik_bootstrap_failure_name(s_bootstrap_sequence.failure()));
+		kill(-s_pid, SIGTERM);
+		kill(s_pid, SIGTERM);
+		waitpid(s_pid, NULL, 0);
+		s_pid = 0;
+		restore_fpga_owner_to_main("spawn-order-failed");
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
 
 	s_last_spawn_error[0] = 0;
 	log_msg("spawned pid=%d path=%s", s_pid, path);
 	transition(MagikLauncherEvent::ChildSpawned);
+	set_bootstrap_phase("spawned", "supervised-spawn");
+	eventf(
+	    "bootstrap_spawned",
+	    "source=supervised-spawn owner=%s pid=%d",
+	    fpga_io_owner_name(),
+	    s_pid);
 	finish_pending_launcher_reply(MagikLauncherSpawnResult::Spawned);
 	return MagikLauncherSpawnResult::Spawned;
 }
@@ -1727,6 +1838,12 @@ void mister_magik_status_write(void)
 	json_escape(f, s_last_restart_error);
 	fprintf(f, ",\"last_spawn_error\":");
 	json_escape(f, s_last_spawn_error);
+	fprintf(f, ",\"bootstrap_phase\":");
+	json_escape(f, s_bootstrap_phase);
+	fprintf(f, ",\"bootstrap_source\":");
+	json_escape(f, s_bootstrap_source);
+	fprintf(f, ",\"bootstrap_phase_ms\":%lu", s_bootstrap_phase_ms);
+	fprintf(f, ",\"bootstrap_black_count\":%lu", s_bootstrap_black_count);
 	fprintf(f, ",");
 	fprintf(f, "\"active_vt\":");
 	json_escape(f, active_vt[0] ? active_vt : "unknown");
@@ -1756,10 +1873,8 @@ void mister_magik_launcher_route_early_black(void)
 	if (s_state == MagikLauncherState::Unconfigured)
 		transition(MagikLauncherEvent::Configured);
 
-	eventf(
-	    "early_display_preserved",
-	    "state=%s action=wait-for-qualified-latch",
-	    magik_launcher_state_name(s_state));
+	if (!enter_bootstrap_black("post-video-init"))
+		restore_stock_menu_after_failed_spawn();
 }
 
 void mister_magik_launcher_enter_after_menu_init(void)
@@ -1767,6 +1882,8 @@ void mister_magik_launcher_enter_after_menu_init(void)
 	if (!mister_magik_launcher_configured()) return;
 	clear_input_policy_marker();
 	input_prepare_launcher_proxy();
+	if (s_state == MagikLauncherState::Unconfigured)
+		transition(MagikLauncherEvent::Configured);
 	if (s_state == MagikLauncherState::BootingMain)
 		transition(MagikLauncherEvent::BeginEnterLauncher);
 	s_spawn_pending = true;

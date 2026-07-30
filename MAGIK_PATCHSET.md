@@ -26,6 +26,14 @@ reapplied at their narrow integration seams.
 
 - Boot through stock `/media/fat/MiSTer` and MiSTer.ini `main=MiSTer_MagiK`.
 - Let Main initialize HDMI/video/menu-core prerequisites.
+- Keep the MagiK-specific Menu RBF's native video background solid black until
+  the first verified latch-presented MagiK frame. HDMI/CRT timing, DE/sync, and
+  downstream OSD composition remain available while native RGB is black; the
+  stock Menu RBF is unchanged.
+- Establish bootstrap black immediately after `video_init()` and before every
+  supervised launcher spawn. Main must disable OSD, OSD keys, launcher input,
+  and LFB routing before latch preflight, then transfer FPGA ownership only
+  after preflight succeeds.
 - Keep Main as the sole writer of the complete `UIO_BUT_SW` framework word,
   including the launcher framebuffer mux, composite sync, SoG, Direct Video,
   scaler, audio, and HDMI flags.
@@ -130,8 +138,9 @@ Runtime changes should stay in or immediately around:
 - narrow command handoff wiring needed to launch through Main
 - `menu.cpp` only for the production latch RBF's logical root-level core-browser
   identity and minimal diagnostic guards
-- `video.h` only for exposing existing video diagnostic entrypoints to MagiK
-  command handlers
+- `video.cpp` / `video.h` only for exposing existing video diagnostic
+  entrypoints to MagiK command handlers and the canonical
+  `UIO_SET_FBUF` bootstrap-disable primitive
 - minimal diagnostic guards in OSD/video entrypoints
 
 Build/docs/test changes may touch:
@@ -146,20 +155,31 @@ Build/docs/test changes may touch:
 ## Implemented Features And Tests
 
 - Exclusive FPGA ownership update: the launcher lifecycle transfers SPI/GPO
-  ownership only after Main has established the black route and prepared the
-  VT/input state. Child exit, kill, handoff, suspend, fork failure, and reboot
+  ownership only after Main has established bootstrap black, completed the
+  runtime latch preflight, and prepared the VT/input state. Child exit, kill,
+  handoff, suspend, fork failure, and reboot
   restore Main ownership before any Main hardware work. `main-status.json`
   publishes owner, epoch, blocked SPI/GPO counts, and the last blocked site.
   Host tests cover transfer ordering, stale transfer refusal, blocked access
   accounting, and restoration.
 
-- Main-owned launcher routing: `video_magik_route_black()` must succeed before
-  the supervised child is spawned. Rust no longer receives an `early-black`
-  fallback that could replace Main's framework word. Missing artifacts, route
-  failure, and fork failure restore stock Menu only while no launcher child
-  exists; the active-child OSD/input suppression invariant is unchanged.
-  Host tests verify that toggling `CONF_VGA_FB` preserves composite sync, SoG,
-  Direct Video, scaler, audio, HDMI, and button bits.
+- Qualified black bootstrap: the MagiK-specific Menu RBF supplies a native
+  black video source while preserving DE, sync, and downstream HDMI/analog OSD
+  composition. `video_magik_enter_bootstrap_black()` issues only the canonical
+  `UIO_SET_FBUF` disable word; it never changes framebuffer mode, clears
+  `/dev/fb0`, or enables a legacy framebuffer. Main enters this idempotent
+  transition after `video_init()` and before every initial, resume, active
+  restart, and crash-respawn child start. The enforced order is bootstrap black,
+  latch/runtime preflight, FPGA ownership transfer, then fork. Unsupported
+  framebuffer commands, preflight failure, and fork failure spawn no child and
+  restore stock OSD/input over the native black Menu background. Status remains
+  `mister-magik-main-status-v2` with additive bootstrap phase/source/time/count
+  fields; the event stream records each successful boundary.
+  `MagikBootstrapSequence` is compiled into the production launcher and is also
+  exercised as a host unit with injected ownership-guard, unsupported-command,
+  preflight, ownership-transfer, fork, and ordering failures. Every injected
+  failure forbids spawn and permits stock OSD recovery only after Main ownership
+  is restored.
 
 Update this section in every PR that adds behavior.
 
@@ -242,16 +262,13 @@ Update this section in every PR that adds behavior.
 - MagiK boot lockdown update: Menu-core boots with MagiK configured now enter
   `BootingMain` visual lockdown before `video_init()`. While that lockdown is
   active, Main suppresses stock HPS framebuffer reset, stock `8888` framebuffer
-  mode writes, framebuffer enable calls, and menu-background work until Rust's
-  `early-black` frame takes over the display.
-- Main-side early-black update: `BootingMain` now routes and clears a `565`
-  MagiK black framebuffer directly from Main before spawning Slint. The old
-  `mister-magik-fb early-black` fork/exec remains as a fallback if the direct
-  route fails.
-- Launcher reveal update: Main reasserts the same `565` MagiK black framebuffer
-  immediately before every supervised launcher spawn, including resume/restart
-  paths used after games and tooling. This keeps HDMI on a known MagiK-sized
-  black frame while the Rust launcher privately settles its first Slint frame.
+  mode writes, framebuffer enable calls, and menu-background work. Immediately
+  after `video_init()`, Main disables LFB routing so the MagiK Menu RBF's native
+  black source remains visible during preflight.
+- Launcher reveal update: Main reasserts bootstrap black before every
+  supervised launcher spawn, including resume/restart/crash paths. Rust keeps
+  its cleared-black startup frame; the first verified latch post is the only
+  route transition that can reveal the MagiK UI.
 - Return reveal update: launcher scripts spawned from `menu.rbf` set
   `MISTER_MAGIK_RETURN_TO_LAUNCHER=1`, allowing Rust to skip the startup splash
   on game return and reveal only the first real launcher frame. The explicit
@@ -390,6 +407,10 @@ Update this section in every PR that adds behavior.
   The command parser tests cover external `load_core` acceptance and rejection,
   while source invariants prove accepted and lifecycle-rejected diagnostics
   follow the handoff state gate before entering the supervised real-path handoff.
+  It also compiles the production bootstrap sequencer and injects every
+  fail-closed boundary, while source invariants prove the production launcher
+  orders black, preflight, ownership transfer, and fork and uses only the
+  canonical framebuffer-disable word.
 - `scripts/check-magik-patch-surface.sh` compares this fork with the upstream
   release baseline and fails if files outside the approved patch surface
   changed, including the narrow structured-handoff allowance for
@@ -592,6 +613,10 @@ recovery update:
 2026-06-20, MiSTer at `192.168.1.117`, after deploying the Linux reboot
 primitive under `LauncherRebooting` visual lockdown:
 
+The early-black implementation evidence in this dated entry is historical and
+was superseded by the qualified native-black bootstrap contract on 2026-07-30.
+It must not be used as qualification evidence for the current platform bundle.
+
 - Deploy passed with `mister-slint/scripts/deploy-main-mister-experiment.sh`.
 - Raw post-deploy reboot started the new `MiSTer_MagiK` fork and reached
   `LauncherActive` with Slint child alive.
@@ -706,6 +731,13 @@ Host tests:
 - Patch-surface check.
 - Main container build.
 - Rebuild parity after env/restart changes.
+- Qualified-bootstrap sequence tests for the success path plus injected
+  ownership guard, unsupported framebuffer command, latch preflight,
+  ownership-transfer, fork, and ordering failures. Failed paths must never
+  reach the parent `ChildSpawned` transition and must recover stock OSD/input
+  over native black.
+- Pinned MagiK Menu RTL/build checks proving native active RGB is zero while
+  DE/sync and both HDMI and analog OSD composition paths remain connected.
 
 Device tests:
 
@@ -724,6 +756,16 @@ Device tests:
   frame without stock OSD/menu flash before reset.
 - Run the 15-sample supervised reboot Ethernet soak and fail the release if any
   sample does not recover agent, SSH, and `LauncherActive` within timeout.
+- Record 30 fps USB Video for supervised cold reboot, launcher restart without
+  RBF reload, game-to-launcher return, and injected preflight failure. After
+  the first post-transition black frame, every frame must remain black until
+  the first sustained MagiK frame; reject Menu static, OSD residue, terminal
+  frames, and partial UI. Retain the frame-reviewed movies with matching Main
+  boot events and latch status.
+- Re-run the complete latch/platform qualification for the exact Main, MagiK
+  runtime, scanout module, and RBF tuple. Require zero drops/rejections and the
+  existing latch stress thresholds. The attended release qualification gate
+  still requires explicit operator authorization.
 
 2026-07-19, MiSTer at `192.168.1.117`, after deploying external `load_core`
 compatibility to `MiSTer_MagiKDev`:
@@ -742,3 +784,20 @@ compatibility to `MiSTer_MagiKDev`:
   confirming the existing MagiK handoff remained intact. Final cleanup
   restored `LauncherActive`, stopped the temporary token service, left TCP
   port `7497` closed, and found no live fault-arming files.
+
+2026-07-30 qualified-black bootstrap candidate:
+
+- Main now uses the production `MagikBootstrapSequence` for the common
+  post-`video_init()` and supervised-spawn path. The canonical framebuffer
+  disable word is emitted even when the command acknowledgement is unavailable;
+  failure still prevents spawn and restores Main-owned stock OSD/input.
+- The paired MiSTer MagiK repository supplies the MagiK-only native-black Menu
+  RTL, pinned integration checks, 30 fps USB Video evidence tooling, and the
+  platform workflow. The stock Menu RBF remains unchanged.
+- Host tests, patch-surface validation, and the Apple-container ARM build passed
+  for this source candidate. RBF synthesis belongs only to the
+  `Build MiSTer MagiK Platform` GitHub Actions workflow and remains pending
+  until that workflow completes.
+- This entry describes a candidate, not a qualified release. GitHub platform
+  build completion, four-path 30 fps USB Video review, and the complete
+  latch/platform qualification remain required before promotion.

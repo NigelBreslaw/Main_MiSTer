@@ -46,6 +46,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-fpga-ownership"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/bootstrap_sequence.cpp" \
+  "$ROOT/tests/bootstrap_sequence_test.cpp" \
+  -o "$OUT-bootstrap-sequence"
+"$OUT-bootstrap-sequence"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_return.cpp" \
   "$ROOT/tests/launcher_return_test.cpp" \
   -o "$OUT-return"
@@ -192,7 +198,7 @@ grep -q 'latch-readiness-report' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'run_launcher_readiness_preflight' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'latch_startup_tsv valid=1 action=launch-latch-ui reason=preflight-passed' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q 'compatibility-screen' "$ROOT/support/mister_magik/launcher.cpp"
-! grep -q 'video_magik_route_black' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'video_magik_enter_bootstrap_black' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'mister_magik_supervised_restart_launcher' "$ROOT/support/mister_magik/launcher_command.cpp"
 grep -q 'launcher-restart-token' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'launcher-restart-used' "$ROOT/support/mister_magik/launcher.cpp"
@@ -201,18 +207,66 @@ grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_mag
 ! grep -q 'execl(path, path, "early-black"' "$ROOT/support/mister_magik/launcher.cpp"
 
 awk '
-  /static void restore_stock_menu_after_failed_spawn/ { in_cleanup=1; child_guard=0; osd=0; input=0 }
+  /int video_magik_enter_bootstrap_black\(\)/ { in_black=1; command=0; disable=0; forbidden=0 }
+  in_black && /spi_uio_cmd_cont\(UIO_SET_FBUF\)/ { command++ }
+  in_black && /spi_w\(0\)/ { disable++ }
+  in_black && /(MiSTer_fb\/parameters\/mode|\/dev\/fb0|FB_EN|FB_FMT_565|set_vga_fb)/ { forbidden=1 }
+  in_black && /^}/ {
+    if (command != 1 || disable != 1 || forbidden) exit 1
+    checked=1
+    in_black=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/video.cpp" || {
+  echo "ERROR: bootstrap black must use only the canonical UIO_SET_FBUF disable command" >&2
+  exit 1
+}
+
+grep -q 's_bootstrap_sequence.black_completed' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 's_bootstrap_sequence.preflight_completed' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 's_bootstrap_sequence.ownership_transferred' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 's_bootstrap_sequence.child_spawned' "$ROOT/support/mister_magik/launcher.cpp"
+
+awk '
+  /void mister_magik_launcher_route_early_black/ { in_early=1; black=0 }
+  in_early && /enter_bootstrap_black\("post-video-init"\)/ { black=1 }
+  in_early && /^}/ {
+    if (!black) exit 1
+    checked=1
+    in_early=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: post-video_init bootstrap must enter the common black transition" >&2
+  exit 1
+}
+
+awk '
+  /video_init\(\)/ { video_init=NR }
+  /mister_magik_launcher_route_early_black\(\)/ { early_black=NR }
+  END {
+    if (!video_init || !early_black || early_black <= video_init) exit 1
+  }
+' "$ROOT/user_io.cpp" || {
+  echo "ERROR: initial bootstrap black must run immediately after video_init" >&2
+  exit 1
+}
+
+awk '
+  /static void restore_stock_menu_after_failed_spawn/ { in_cleanup=1; child_guard=0; black=0; osd=0; input=0; legacy=0 }
   in_cleanup && /if \(s_pid\)/ { child_guard=1 }
+  in_cleanup && /video_magik_enter_bootstrap_black\(\)/ { black=child_guard }
   in_cleanup && /user_io_osd_key_enable\(1\)/ { osd=child_guard }
   in_cleanup && /input_switch\(1\)/ { input=child_guard }
+  in_cleanup && /(video_fb_enable|video_menu_bg)\(/ { legacy=1 }
   in_cleanup && /launcher_spawn_restored_stock_menu/ {
-    if (!child_guard || !osd || !input) exit 1
+    if (!child_guard || !black || !osd || !input || legacy) exit 1
     checked=1
     in_cleanup=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
-  echo "ERROR: failed-spawn cleanup must guard against enabling stock OSD/input with a live launcher child" >&2
+  echo "ERROR: failed-spawn cleanup must restore stock OSD/input over native black without a legacy framebuffer" >&2
   exit 1
 }
 
@@ -221,24 +275,75 @@ awk '
   spawn_signature && /^\{/ {
     in_spawn=1
     spawn_signature=0
+    black=0
     preflight=0
     owner=0
   }
-  in_spawn && /run_launcher_readiness_preflight\(path\)/ { preflight=1 }
+  in_spawn && /enter_bootstrap_black\("supervised-spawn"\)/ { black=1 }
+  in_spawn && /run_launcher_readiness_preflight\(path\)/ {
+    if (!black) exit 1
+    preflight=1
+  }
   in_spawn && /transfer_fpga_owner_to_launcher/ {
-    if (!preflight) exit 1
+    if (!black || !preflight) exit 1
     owner=1
   }
   in_spawn && /s_pid = fork\(\)/ {
-    if (!preflight || !owner) exit 1
+    if (!black || !preflight || !owner) exit 1
     checked=1
     in_spawn=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
-  echo "ERROR: Main must complete readiness preflight before FPGA ownership transfer and launcher spawn" >&2
+  echo "ERROR: Main must establish black, preflight, transfer ownership, then spawn" >&2
   exit 1
 }
+
+awk '
+  /static MagikLauncherSpawnResult spawn_launcher\(void\)/ && $0 !~ /;/ { signature=1; next }
+  signature && /^\{/ { in_spawn=1; signature=0 }
+  in_spawn && /if \(!enter_bootstrap_black\("supervised-spawn"\)\)/ { black_failure=1 }
+  black_failure && /restore_stock_menu_after_failed_spawn\(\)/ { black_recovered=1; black_failure=0 }
+  in_spawn && /s_bootstrap_sequence\.preflight_completed\(preflight_passed\)/ { preflight_failure=1 }
+  preflight_failure && /restore_stock_menu_after_failed_spawn\(\)/ { preflight_recovered=1; preflight_failure=0 }
+  in_spawn && /if \(s_pid < 0\)/ { fork_failure=1 }
+  fork_failure && /restore_fpga_owner_to_main\("fork-failed"\)/ { fork_owner=1 }
+  fork_failure && /restore_stock_menu_after_failed_spawn\(\)/ { fork_recovered=fork_owner; fork_failure=0 }
+  in_spawn && /return MagikLauncherSpawnResult::Spawned/ { in_spawn=0 }
+  END {
+    if (!black_recovered || !preflight_recovered || !fork_recovered) exit 1
+  }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: bootstrap-command, preflight, and fork failures must fail closed with no child" >&2
+  exit 1
+}
+
+for event in \
+  bootstrap_black_entered \
+  bootstrap_preflight_completed \
+  bootstrap_ownership_transferred \
+  bootstrap_spawned; do
+  grep -q "\"$event\"" "$ROOT/support/mister_magik/launcher.cpp" || {
+    echo "ERROR: missing bootstrap event $event" >&2
+    exit 1
+  }
+done
+
+for field in \
+  bootstrap_phase \
+  bootstrap_source \
+  bootstrap_phase_ms \
+  bootstrap_black_count; do
+  grep -q "$field" "$ROOT/support/mister_magik/launcher.cpp" || {
+    echo "ERROR: missing bootstrap status field $field" >&2
+    exit 1
+  }
+done
+
+if [[ "$(grep -Ec '^[[:space:]]*s_pid = fork[(][)];' "$ROOT/support/mister_magik/launcher.cpp")" -ne 1 ]]; then
+  echo "ERROR: all initial, resume, restart, and crash-respawn child starts must converge on spawn_launcher" >&2
+  exit 1
+fi
 
 verify_manifest_selection_fixture() {
   local app="$1"

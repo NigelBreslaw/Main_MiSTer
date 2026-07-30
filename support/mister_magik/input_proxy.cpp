@@ -37,3 +37,8 @@ int magik_input_proxy_key(uint32_t mask, bool osd_button)
 	default: return 0;
 	}
 }
+
+bool magik_input_proxy_allows_fpga_output(bool launcher_mode)
+{
+	return !launcher_mode;
+}

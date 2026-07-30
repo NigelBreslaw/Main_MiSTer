@@ -79,6 +79,11 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   -o "$OUT-input-proxy"
 "$OUT-input-proxy"
 
+if [ "$(grep -c 'magik_input_proxy_allows_fpga_output(launcher_mode)' "$ROOT/input.cpp")" -lt 2 ]; then
+  echo "ERROR: launcher input polling must isolate both disk-LED and post-poll FPGA output" >&2
+  exit 1
+fi
+
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/tests/user_io_config_map_test.cpp" \
   -o "$OUT-user-io-config-map"

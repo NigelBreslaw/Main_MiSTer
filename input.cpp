@@ -6369,7 +6369,9 @@ static int input_test(int getchar, bool launcher_mode, int launcher_command_fd, 
 				static char status[16];
 				if (read(pool[NUMDEV + 2].fd, status, sizeof(status) - 1) && status[0] != '0')
 				{
-					if (sysled_is_enabled || video_fb_state()) DISKLED_ON;
+					if (magik_input_proxy_allows_fpga_output(launcher_mode) &&
+					    (sysled_is_enabled || video_fb_state()))
+						DISKLED_ON;
 				}
 				lseek(pool[NUMDEV + 2].fd, 0, SEEK_SET);
 			}
@@ -6426,14 +6428,13 @@ static int input_poll_mode(int getchar, bool launcher_mode, int launcher_command
  	if (!autofire_cfg_parsed) autofire_cfg_parsed = parse_autofire_cfg();
 	static uint32_t joy_mask_prev[NUMPLAYERS] = {};
 
-	add_frame_callback(key_update_frames_held_cb);
-
-
 	int ret = input_test(getchar, launcher_mode, launcher_command_fd, false);
 	if (getchar) return ret;
 
 	uinp_check_key();
+	if (!magik_input_proxy_allows_fpga_output(launcher_mode)) return ret;
 
+	add_frame_callback(key_update_frames_held_cb);
 	static int prev_dx = 0;
 	static int prev_dy = 0;
 

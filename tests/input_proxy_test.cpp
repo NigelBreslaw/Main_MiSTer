@@ -18,5 +18,7 @@ int main()
 	assert(magik_input_proxy_key(0x2000, false) == MagikProxyKeyF10);
 	assert(magik_input_proxy_key(0, true) == MagikProxyKeyMenu);
 	assert(magik_input_proxy_key(0x4000, false) == 0);
+	assert(magik_input_proxy_allows_fpga_output(false));
+	assert(!magik_input_proxy_allows_fpga_output(true));
 	return 0;
 }

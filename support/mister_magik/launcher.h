@@ -2,6 +2,7 @@
 
 bool mister_magik_launcher_configured(void);
 bool mister_magik_launcher_active(void);
+bool mister_magik_launcher_session_owned(void);
 bool mister_magik_launcher_input_proxy_active(void);
 int mister_magik_launcher_command_fd(void);
 bool mister_magik_launcher_main_framebuffer_suppressed(void);

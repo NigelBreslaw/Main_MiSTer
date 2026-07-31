@@ -7,6 +7,7 @@ const char *magik_launcher_state_name(MagikLauncherState state)
 	case MagikLauncherState::Unconfigured: return "Unconfigured";
 	case MagikLauncherState::BootingMain: return "BootingMain";
 	case MagikLauncherState::EnteringLauncher: return "EnteringLauncher";
+	case MagikLauncherState::LauncherStarting: return "LauncherStarting";
 	case MagikLauncherState::LauncherActive: return "LauncherActive";
 	case MagikLauncherState::HandoffToGame: return "HandoffToGame";
 	case MagikLauncherState::HandoffToStockMenu: return "HandoffToStockMenu";
@@ -25,6 +26,7 @@ const char *magik_launcher_event_name(MagikLauncherEvent event)
 	case MagikLauncherEvent::Configured: return "Configured";
 	case MagikLauncherEvent::BeginEnterLauncher: return "BeginEnterLauncher";
 	case MagikLauncherEvent::ChildSpawned: return "ChildSpawned";
+	case MagikLauncherEvent::LauncherReady: return "LauncherReady";
 	case MagikLauncherEvent::LaunchRequested: return "LaunchRequested";
 	case MagikLauncherEvent::ExitRequested: return "ExitRequested";
 	case MagikLauncherEvent::ChildExitedUnexpectedly: return "ChildExitedUnexpectedly";
@@ -53,7 +55,13 @@ const char *magik_launcher_restart_action_name(MagikLauncherRestartAction action
 
 bool magik_launcher_is_active(MagikLauncherState state)
 {
+	return state == MagikLauncherState::LauncherActive;
+}
+
+bool magik_launcher_owns_session(MagikLauncherState state)
+{
 	return state == MagikLauncherState::EnteringLauncher ||
+	       state == MagikLauncherState::LauncherStarting ||
 	       state == MagikLauncherState::LauncherActive ||
 	       state == MagikLauncherState::LauncherSuspending ||
 	       state == MagikLauncherState::LauncherSuspended ||
@@ -77,9 +85,15 @@ bool magik_launcher_accepts_handoff(MagikLauncherState state)
 	return state == MagikLauncherState::LauncherActive;
 }
 
+bool magik_launcher_accepts_video_reinit(MagikLauncherState state)
+{
+	return state == MagikLauncherState::LauncherActive;
+}
+
 bool magik_launcher_polls_commands(MagikLauncherState state)
 {
 	return state == MagikLauncherState::LauncherActive ||
+	       state == MagikLauncherState::LauncherStarting ||
 	       state == MagikLauncherState::LauncherSuspended ||
 	       state == MagikLauncherState::LauncherCrashed;
 }
@@ -122,6 +136,19 @@ bool magik_launcher_transition(
 		break;
 	case MagikLauncherState::EnteringLauncher:
 		if (event == MagikLauncherEvent::ChildSpawned)
+		{
+			*next = MagikLauncherState::LauncherStarting;
+			return true;
+		}
+		if (event == MagikLauncherEvent::ChildCrashed ||
+		    event == MagikLauncherEvent::ChildExitedUnexpectedly)
+		{
+			*next = MagikLauncherState::LauncherCrashed;
+			return true;
+		}
+		break;
+	case MagikLauncherState::LauncherStarting:
+		if (event == MagikLauncherEvent::LauncherReady)
 		{
 			*next = MagikLauncherState::LauncherActive;
 			return true;

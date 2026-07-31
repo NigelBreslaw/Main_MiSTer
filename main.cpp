@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
 			fpga_wait_to_reset();
 		}
 
-		if (mister_magik_launcher_active())
+		if (mister_magik_launcher_session_owned())
 		{
 			mister_magik_launcher_poll();
 			if (mister_magik_launcher_input_proxy_active())

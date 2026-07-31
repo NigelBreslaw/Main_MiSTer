@@ -16,10 +16,21 @@ int main()
 	assert(s == MagikLauncherState::BootingMain);
 	s = step(s, MagikLauncherEvent::BeginEnterLauncher);
 	assert(s == MagikLauncherState::EnteringLauncher);
-	assert(magik_launcher_is_active(s));
+	assert(!magik_launcher_is_active(s));
+	assert(magik_launcher_owns_session(s));
 	s = step(s, MagikLauncherEvent::ChildSpawned);
+	assert(s == MagikLauncherState::LauncherStarting);
+	assert(!magik_launcher_is_active(s));
+	assert(magik_launcher_owns_session(s));
+	assert(!magik_launcher_accepts_handoff(s));
+	assert(!magik_launcher_accepts_video_reinit(s));
+	assert(magik_launcher_polls_commands(s));
+	s = step(s, MagikLauncherEvent::LauncherReady);
 	assert(s == MagikLauncherState::LauncherActive);
+	assert(magik_launcher_is_active(s));
+	assert(magik_launcher_owns_session(s));
 	assert(magik_launcher_accepts_handoff(s));
+	assert(magik_launcher_accepts_video_reinit(s));
 	assert(magik_launcher_polls_commands(s));
 	assert(magik_launcher_idle_waits(s));
 
@@ -40,7 +51,8 @@ int main()
 
 	MagikLauncherState crash = step(s, MagikLauncherEvent::ChildCrashed);
 	assert(crash == MagikLauncherState::LauncherCrashed);
-	assert(magik_launcher_is_active(crash));
+	assert(!magik_launcher_is_active(crash));
+	assert(magik_launcher_owns_session(crash));
 	assert(magik_launcher_polls_commands(crash));
 	assert(magik_launcher_idle_waits(crash));
 	assert(magik_launcher_restart_action(crash) == MagikLauncherRestartAction::RespawnCrashed);
@@ -48,32 +60,40 @@ int main()
 	assert(strcmp(magik_launcher_state_name(crash), "LauncherCrashed") == 0);
 	MagikLauncherState crash_restart = step(crash, MagikLauncherEvent::BeginEnterLauncher);
 	assert(crash_restart == MagikLauncherState::EnteringLauncher);
-	assert(step(crash_restart, MagikLauncherEvent::ChildSpawned) == MagikLauncherState::LauncherActive);
+	MagikLauncherState crash_starting = step(crash_restart, MagikLauncherEvent::ChildSpawned);
+	assert(crash_starting == MagikLauncherState::LauncherStarting);
+	assert(step(crash_starting, MagikLauncherEvent::LauncherReady) == MagikLauncherState::LauncherActive);
 
 	MagikLauncherState suspending = step(s, MagikLauncherEvent::SuspendRequested);
 	assert(suspending == MagikLauncherState::LauncherSuspending);
-	assert(magik_launcher_is_active(suspending));
+	assert(!magik_launcher_is_active(suspending));
+	assert(magik_launcher_owns_session(suspending));
 	assert(!magik_launcher_accepts_handoff(suspending));
+	assert(!magik_launcher_accepts_video_reinit(suspending));
 	assert(!magik_launcher_polls_commands(suspending));
 	assert(!magik_launcher_idle_waits(suspending));
 	assert(magik_launcher_restart_action(suspending) == MagikLauncherRestartAction::Reject);
 
 	MagikLauncherState suspended = step(suspending, MagikLauncherEvent::ChildExitedExpectedly);
 	assert(suspended == MagikLauncherState::LauncherSuspended);
-	assert(magik_launcher_is_active(suspended));
+	assert(!magik_launcher_is_active(suspended));
+	assert(magik_launcher_owns_session(suspended));
 	assert(!magik_launcher_accepts_handoff(suspended));
 	assert(magik_launcher_polls_commands(suspended));
 	assert(magik_launcher_idle_waits(suspended));
 	assert(magik_launcher_restart_action(suspended) == MagikLauncherRestartAction::ResumeSuspended);
 	MagikLauncherState restarting = step(suspended, MagikLauncherEvent::ResumeRequested);
 	assert(restarting == MagikLauncherState::EnteringLauncher);
-	assert(step(restarting, MagikLauncherEvent::ChildSpawned) == MagikLauncherState::LauncherActive);
+	MagikLauncherState resume_starting = step(restarting, MagikLauncherEvent::ChildSpawned);
+	assert(resume_starting == MagikLauncherState::LauncherStarting);
+	assert(step(resume_starting, MagikLauncherEvent::LauncherReady) == MagikLauncherState::LauncherActive);
 
 	assert(magik_launcher_restart_action(s) == MagikLauncherRestartAction::RestartActive);
 
 	MagikLauncherState rebooting = step(s, MagikLauncherEvent::RebootRequested);
 	assert(rebooting == MagikLauncherState::LauncherRebooting);
-	assert(magik_launcher_is_active(rebooting));
+	assert(!magik_launcher_is_active(rebooting));
+	assert(magik_launcher_owns_session(rebooting));
 	assert(!magik_launcher_accepts_handoff(rebooting));
 	assert(!magik_launcher_polls_commands(rebooting));
 	assert(!magik_launcher_idle_waits(rebooting));

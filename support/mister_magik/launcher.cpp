@@ -1759,6 +1759,12 @@ bool mister_magik_launcher_active(void)
 	return magik_launcher_is_active(s_state);
 }
 
+bool mister_magik_launcher_session_owned(void)
+{
+	if (s_video_diagnostic_active) return false;
+	return magik_launcher_owns_session(s_state);
+}
+
 bool mister_magik_launcher_input_proxy_active(void)
 {
 	return !s_video_diagnostic_active && s_state == MagikLauncherState::LauncherActive;
@@ -1774,7 +1780,7 @@ bool mister_magik_launcher_main_framebuffer_suppressed(void)
 {
 	if (s_video_diagnostic_active) return false;
 	return s_state == MagikLauncherState::BootingMain ||
-	       magik_launcher_is_active(s_state);
+	       magik_launcher_owns_session(s_state);
 }
 
 void mister_magik_launcher_begin_boot_lockdown(void)

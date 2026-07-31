@@ -32,7 +32,7 @@ static void scheduler_co_poll(void)
 
 		{
 			SPIKE_SCOPE("co_poll", 1000);
-			if (mister_magik_launcher_active())
+			if (mister_magik_launcher_session_owned())
 			{
 				mister_magik_launcher_poll();
 				if (mister_magik_launcher_input_proxy_active())
@@ -64,7 +64,7 @@ static void scheduler_co_ui(void)
 	{
 		{
 			SPIKE_SCOPE("co_ui", 1000);
-			if (!mister_magik_launcher_active())
+			if (!mister_magik_launcher_session_owned())
 			{
 				HandleUI();
 				OsdUpdate();

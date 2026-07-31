@@ -501,9 +501,9 @@ void OsdClear(void)
 // enable displaying of OSD
 void OsdEnable(unsigned char mode)
 {
-	if (mister_magik_launcher_active())
+	if (mister_magik_launcher_session_owned())
 	{
-		mister_magik_record_invariant("unexpected_osd_call_while_launcher_active", "OsdEnable");
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "OsdEnable");
 		return;
 	}
 
@@ -514,9 +514,9 @@ void OsdEnable(unsigned char mode)
 
 void InfoEnable(int x, int y, int width, int height)
 {
-	if (mister_magik_launcher_active())
+	if (mister_magik_launcher_session_owned())
 	{
-		mister_magik_record_invariant("unexpected_osd_call_while_launcher_active", "InfoEnable");
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "InfoEnable");
 		return;
 	}
 
@@ -549,9 +549,9 @@ void OsdDisable()
 
 void OsdMenuCtl(int en)
 {
-	if (mister_magik_launcher_active())
+	if (mister_magik_launcher_session_owned())
 	{
-		mister_magik_record_invariant("unexpected_osd_call_while_launcher_active", en ? "OsdMenuCtl enable" : "OsdMenuCtl disable");
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", en ? "OsdMenuCtl enable" : "OsdMenuCtl disable");
 		return;
 	}
 
@@ -681,9 +681,9 @@ char* OsdCoreNameGet()
 
 void OsdUpdate()
 {
-	if (mister_magik_launcher_active())
+	if (mister_magik_launcher_session_owned())
 	{
-		mister_magik_record_invariant("unexpected_osd_call_while_launcher_active", "OsdUpdate");
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "OsdUpdate");
 		return;
 	}
 

@@ -5,8 +5,8 @@
 int main()
 {
 	MagikLauncherInvariant event;
-	magik_launcher_invariant_init(&event, "unexpected_osd_call_while_launcher_active", "OsdUpdate");
-	assert(!strcmp(event.kind, "unexpected_osd_call_while_launcher_active"));
+	magik_launcher_invariant_init(&event, "unexpected_osd_call_while_launcher_owned", "OsdUpdate");
+	assert(!strcmp(event.kind, "unexpected_osd_call_while_launcher_owned"));
 	assert(!strcmp(event.detail, "OsdUpdate"));
 
 	magik_launcher_invariant_init(&event, 0, 0);

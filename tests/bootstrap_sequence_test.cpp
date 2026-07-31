@@ -26,6 +26,8 @@ int main()
 	MagikBootstrapSequence success = ready_for_spawn();
 	assert(success.child_spawned(true));
 	assert(success.stage() == MagikBootstrapStage::Spawned);
+	assert(success.ready(true));
+	assert(success.stage() == MagikBootstrapStage::Ready);
 
 	MagikBootstrapSequence live_child;
 	assert(!live_child.begin(true, true));
@@ -62,6 +64,12 @@ int main()
 	assert(!fork.child_spawned(false));
 	assert(fork.failure() == MagikBootstrapFailure::Fork);
 	assert_recovers_without_spawn(fork);
+
+	MagikBootstrapSequence ready_not_verified = ready_for_spawn();
+	assert(ready_not_verified.child_spawned(true));
+	assert(!ready_not_verified.ready(false));
+	assert(ready_not_verified.failure() == MagikBootstrapFailure::Ordering);
+	assert_recovers_without_spawn(ready_not_verified);
 
 	MagikBootstrapSequence ordering;
 	assert(ordering.begin(true, false));

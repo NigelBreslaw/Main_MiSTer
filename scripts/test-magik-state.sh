@@ -23,6 +23,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-state"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/launcher_ready.cpp" \
+  "$ROOT/tests/launcher_ready_test.cpp" \
+  -o "$OUT-ready"
+"$OUT-ready"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_command.cpp" \
   "$ROOT/tests/launcher_command_test.cpp" \
   -o "$OUT-command"
@@ -151,19 +157,21 @@ grep -q 'complete_handoff_to_game(cmd.path, true)' "$ROOT/support/mister_magik/l
 }
 
 awk '
-  /static bool write_launcher_script\(/ { in_script=1; sourced=0; settings=0; display=0; confirm=0 }
+  /static bool write_launcher_script\(/ { in_script=1; sourced=0; token=0; fifo=0; settings=0; display=0; confirm=0 }
   in_script && /"  \. / { sourced=1 }
+  in_script && /MISTER_MAGIK_STARTUP_TOKEN/ { token=sourced }
+  in_script && /MISTER_MAGIK_READY_FIFO/ { fifo=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_SETTINGS_V1/ { settings=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_DISPLAY_V1/ { display=sourced }
   in_script && /MISTER_MAGIK_DISPLAY_CONFIRM_UI/ { confirm=sourced }
   in_script && /fclose\(f\)/ {
-    if (!settings || !display || !confirm) exit 1
+    if (!token || !fifo || !settings || !display || !confirm) exit 1
     checked=1
     in_script=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
-  echo "ERROR: launcher.env must not override Main-owned runtime display contracts" >&2
+  echo "ERROR: launcher.env must not override Main-owned readiness or runtime display contracts" >&2
   exit 1
 }
 
@@ -244,6 +252,9 @@ grep -q 's_bootstrap_sequence.black_completed' "$ROOT/support/mister_magik/launc
 grep -q 's_bootstrap_sequence.preflight_completed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 's_bootstrap_sequence.ownership_transferred' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 's_bootstrap_sequence.child_spawned' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 's_bootstrap_sequence.ready' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'MISTER_MAGIK_READY_FIFO' "$ROOT/support/mister_magik/launcher.cpp"
+! grep -q 'ACK_FIFO\|visibility_ack\|VISIBILITY_FIFO' "$ROOT/support/mister_magik/launcher.cpp"
 
 awk '
   /void mister_magik_launcher_route_early_black/ { in_early=1; black=0 }
@@ -340,7 +351,9 @@ for event in \
   bootstrap_black_entered \
   bootstrap_preflight_completed \
   bootstrap_ownership_transferred \
-  bootstrap_spawned; do
+  bootstrap_spawned \
+  launcher_ready \
+  launcher_ready_failed; do
   grep -q "\"$event\"" "$ROOT/support/mister_magik/launcher.cpp" || {
     echo "ERROR: missing bootstrap event $event" >&2
     exit 1
@@ -351,7 +364,11 @@ for field in \
   bootstrap_phase \
   bootstrap_source \
   bootstrap_phase_ms \
-  bootstrap_black_count; do
+  bootstrap_black_count \
+  launcher_ready_phase \
+  launcher_ready_attempt \
+  launcher_ready_remaining_ms \
+  launcher_ready_last_failure; do
   grep -q "$field" "$ROOT/support/mister_magik/launcher.cpp" || {
     echo "ERROR: missing bootstrap status field $field" >&2
     exit 1

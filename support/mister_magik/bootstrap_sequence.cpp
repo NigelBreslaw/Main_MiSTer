@@ -63,6 +63,16 @@ bool MagikBootstrapSequence::child_spawned(bool fork_succeeded)
 	return true;
 }
 
+bool MagikBootstrapSequence::ready(bool verified)
+{
+	if (stage_ != MagikBootstrapStage::Spawned)
+		return fail(MagikBootstrapFailure::Ordering);
+	if (!verified)
+		return fail(MagikBootstrapFailure::Ordering);
+	stage_ = MagikBootstrapStage::Ready;
+	return true;
+}
+
 bool MagikBootstrapSequence::recover_stock_osd()
 {
 	if (stage_ != MagikBootstrapStage::Failed)
@@ -101,6 +111,7 @@ const char *magik_bootstrap_stage_name(MagikBootstrapStage stage)
 	case MagikBootstrapStage::PreflightComplete: return "preflight-complete";
 	case MagikBootstrapStage::OwnershipTransferred: return "ownership-transferred";
 	case MagikBootstrapStage::Spawned: return "spawned";
+	case MagikBootstrapStage::Ready: return "ready";
 	case MagikBootstrapStage::Failed: return "failed";
 	case MagikBootstrapStage::RecoveredStockOsd: return "recovered-stock-osd";
 	}

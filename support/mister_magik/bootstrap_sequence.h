@@ -8,6 +8,7 @@ enum class MagikBootstrapStage
 	PreflightComplete,
 	OwnershipTransferred,
 	Spawned,
+	Ready,
 	Failed,
 	RecoveredStockOsd,
 };
@@ -33,6 +34,7 @@ public:
 	bool preflight_completed(bool passed);
 	bool ownership_transferred(bool transferred);
 	bool child_spawned(bool fork_succeeded);
+	bool ready(bool verified);
 	bool recover_stock_osd();
 
 	MagikBootstrapStage stage() const;

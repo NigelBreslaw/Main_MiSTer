@@ -36,7 +36,9 @@ reapplied at their narrow integration seams.
   after preflight succeeds.
 - Keep Main as the sole writer of the complete `UIO_BUT_SW` framework word,
   including the launcher framebuffer mux, composite sync, SoG, Direct Video,
-  scaler, audio, and HDMI flags.
+  scaler, audio, and HDMI flags. After the canonical bootstrap LFB disable,
+  reassert the launcher framebuffer mux for a resolved Direct Video route
+  before transferring FPGA ownership to Rust.
 - Start MiSTer MagiK Slint on `tty2` after Main video initialization.
 - Keep Main in dormant launcher mode while Slint owns the visible launcher UI.
   Dormant launcher mode blocks on the command FIFO and supervised-child exit,
@@ -175,6 +177,12 @@ Build/docs/test changes may touch:
   restore stock OSD/input over the native black Menu background. Status remains
   `mister-magik-main-status-v2` with additive bootstrap phase/source/time/count
   fields; the event stream records each successful boundary.
+  A resolved Direct Video route reasserts `CONF_VGA_FB` through Main's complete
+  framework-word writer after the canonical LFB disable succeeds and before
+  ownership transfer, so the analog output selects the downstream framebuffer
+  mixer instead of the native-black source. The host policy test enforces that
+  ordering while keeping `video_magik_enter_bootstrap_black()` limited to the
+  canonical disable command.
   `MagikBootstrapSequence` is compiled into the production launcher and is also
   exercised as a host unit with injected ownership-guard, unsupported-command,
   preflight, ownership-transfer, fork, and ordering failures. Every injected

@@ -222,6 +222,24 @@ awk '
   exit 1
 }
 
+awk '
+  /static bool enter_bootstrap_black\(const char \*source\)/ { in_black=1; disabled=0; mux=0 }
+  in_black && /s_bootstrap_sequence.black_completed\(acknowledged\)/ { disabled=1 }
+  in_black && /if \(cfg.direct_video\) set_vga_fb\(1\);/ {
+    if (!disabled) exit 1
+    mux=1
+  }
+  in_black && /^}/ {
+    if (!disabled || !mux) exit 1
+    checked=1
+    in_black=0
+  }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: Direct Video framebuffer mux must follow successful bootstrap black" >&2
+  exit 1
+}
+
 grep -q 's_bootstrap_sequence.black_completed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 's_bootstrap_sequence.preflight_completed' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 's_bootstrap_sequence.ownership_transferred' "$ROOT/support/mister_magik/launcher.cpp"

@@ -751,6 +751,7 @@ static bool enter_bootstrap_black(const char *source)
 		set_bootstrap_phase("black-failed", source);
 		return false;
 	}
+	if (cfg.direct_video) set_vga_fb(1);
 
 	s_bootstrap_black_count++;
 	set_bootstrap_phase("black-entered", source);

@@ -874,3 +874,7 @@ compatibility to `MiSTer_MagiKDev`:
   resolution and verification, launcher verification and preflight, child
   spawn, and the launcher exec boundary. These markers make the black interval
   attributable without including host polling latency.
+- Menu return RBF requests resolve to the readable MagiK latch before the stock
+  Menu bitstream is opened or loaded. The inherited one-shot return marker is
+  preserved for the final launcher, while an unavailable latch falls back once
+  to the unchanged stock Menu path with an explicit diagnostic.

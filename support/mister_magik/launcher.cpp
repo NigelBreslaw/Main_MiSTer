@@ -2044,6 +2044,35 @@ bool mister_magik_launcher_configured(void)
 	return FileExists(magik_launcher_relative_path(), 0) != 0;
 }
 
+const char *mister_magik_launcher_resolve_rbf_load(const char *path)
+{
+	if (!path ||
+	    (strcasecmp(path, "menu.rbf") &&
+	     strcasecmp(path, "/media/fat/menu.rbf")) ||
+	    !mister_magik_launcher_configured())
+		return path;
+
+	const char *latch_path = magik_latch_menu_path();
+	if (access(latch_path, R_OK) != 0)
+	{
+		eventf(
+		    "direct_latch_unavailable",
+		    "requested=%s latch=%s errno=%d fallback=stock-menu",
+		    path,
+		    latch_path,
+		    errno);
+		return path;
+	}
+
+	magik_launcher_mark_latch_menu_return(path);
+	eventf(
+	    "direct_latch_selected",
+	    "requested=%s resolved=%s",
+	    path,
+	    latch_path);
+	return latch_path;
+}
+
 bool mister_magik_launcher_active(void)
 {
 	if (s_video_diagnostic_active) return false;

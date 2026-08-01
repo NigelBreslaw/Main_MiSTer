@@ -18,6 +18,7 @@
 #include "shmem.h"
 #include "offload.h"
 #include "support/mister_magik/fpga_ownership.h"
+#include "support/mister_magik/launcher.h"
 
 #include "fpga_base_addr_ac5.h"
 #include "fpga_manager.h"
@@ -430,6 +431,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	OsdDisable();
 	static char path[1024];
 	int ret = 0;
+	name = mister_magik_launcher_resolve_rbf_load(name);
 
 	if(cfg)
 	{

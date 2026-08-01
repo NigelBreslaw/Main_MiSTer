@@ -1925,7 +1925,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	    fpga_io_owner_name(),
 	    (unsigned long long)fpga_io_owner_epoch());
 
-	event_jsonl("launcher_child_spawn_begin", "executable=/sbin/agetty");
+	event_jsonl("launcher_child_spawn_begin", "executable=/bin/bash tty=/dev/tty2");
 	s_pid = fork();
 	if (s_pid < 0)
 	{
@@ -1941,11 +1941,36 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	if (!s_pid)
 	{
 		setenv("MISTER_MAGIK_PATH", path, 1);
-		setsid();
+		if (setsid() < 0)
+		{
+			eventf("launcher_session_failed", "stage=setsid errno=%d", errno);
+			_exit(127);
+		}
+		int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY);
+		if (tty_fd < 0)
+		{
+			eventf("launcher_session_failed", "stage=tty-open path=%s errno=%d", s_tty_path, errno);
+			_exit(127);
+		}
+		if (ioctl(tty_fd, TIOCSCTTY, 0) < 0)
+		{
+			eventf("launcher_session_failed", "stage=controlling-tty path=%s errno=%d", s_tty_path, errno);
+			close(tty_fd);
+			_exit(127);
+		}
+		if (dup2(tty_fd, STDIN_FILENO) < 0 ||
+		    dup2(tty_fd, STDOUT_FILENO) < 0 ||
+		    dup2(tty_fd, STDERR_FILENO) < 0)
+		{
+			eventf("launcher_session_failed", "stage=stdio path=%s errno=%d", s_tty_path, errno);
+			close(tty_fd);
+			_exit(127);
+		}
+		if (tty_fd > STDERR_FILENO) close(tty_fd);
 		event_jsonl(
 		    "launcher_exec_begin",
-		    "executable=/sbin/agetty launcher=/tmp/mister_magik_launcher");
-		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l", s_script_path, "-i", "--nohostname", "-L", s_tty, "linux", NULL);
+		    "executable=/bin/bash launcher=/tmp/mister_magik_launcher tty=/dev/tty2");
+		execl("/bin/bash", "bash", s_script_path, NULL);
 		_exit(127);
 	}
 	if (!s_bootstrap_sequence.child_spawned(true))

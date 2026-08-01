@@ -41,7 +41,10 @@ reapplied at their narrow integration seams.
   scaler, audio, and HDMI flags. After the canonical bootstrap LFB disable,
   reassert the launcher framebuffer mux for a resolved Direct Video route
   before transferring FPGA ownership to Rust.
-- Start MiSTer MagiK Slint on `tty2` after Main video initialization.
+- Start MiSTer MagiK Slint on `tty2` after Main video initialization. Main
+  creates the child session, acquires `tty2` as its controlling terminal, and
+  executes the generated Bash launcher directly; no `agetty` login wrapper is
+  involved.
 - Enter `LauncherStarting` after spawning Slint and reserve
   `LauncherActive` for the accepted token- and PID-bound ready report. Keep
   stock Main scheduler, OSD, input, and framebuffer work suppressed throughout

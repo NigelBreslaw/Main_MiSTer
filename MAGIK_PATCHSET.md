@@ -66,6 +66,7 @@ reapplied at their narrow integration seams.
   - `mister_magik_suspend`
   - `mister_magik_resume`
   - `mister_magik_restart_launcher`
+  - `mister_magik_reload_main` (Dev executable only)
   - `mister_magik_reboot`
 - Accept explicit attended display diagnostics for rare HDMI/scaler bad states:
   - `mister_magik_hdmi_power_cycle`
@@ -108,6 +109,13 @@ reapplied at their narrow integration seams.
 - Treat a supervised reboot as MagiK-owned visual lockdown until reset: Main
   keeps OSD/menu/framebuffer paths suppressed, does not poll more commands, and
   asks Linux to reboot cleanly from a detached, fd-scrubbed child after syncing.
+- Allow an authenticated Dev deployment to replace Main without rebooting
+  Linux. The command is accepted only from `LauncherActive` while the running
+  executable is `/media/fat/MiSTer_MagiKDev`; Main acknowledges, stops and
+  reaps Slint, enters bootstrap black, syncs, and re-execs that explicit path
+  against the already-loaded latch RBF. Status advertises the capability so the
+  host uses a Linux reboot only for the initial installation or bounded
+  recovery.
 - Treat an unexpected Slint child exit as a MagiK-owned crash-recovery state:
   keep Main UI/OSD/framebuffer paths suppressed, keep polling lifecycle
   commands, and allow `mister_magik_restart_launcher` to respawn Slint.

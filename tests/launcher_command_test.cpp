@@ -41,6 +41,9 @@ int main()
 	assert(magik_launcher_parse_command("mister_magik_restart_launcher", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::RestartLauncher);
 	assert(!strcmp(magik_launcher_command_type_name(cmd.type), "RestartLauncher"));
+	assert(magik_launcher_parse_command("mister_magik_reload_main", &cmd));
+	assert(cmd.type == MagikLauncherCommandType::ReloadMain);
+	assert(!strcmp(magik_launcher_command_type_name(cmd.type), "ReloadMain"));
 
 	assert(magik_launcher_parse_command("mister_magik_hdmi_power_cycle", &cmd));
 	assert(cmd.type == MagikLauncherCommandType::HdmiPowerCycle);

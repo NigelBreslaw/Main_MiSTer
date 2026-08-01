@@ -14,6 +14,7 @@ enum class MagikLauncherCommandType
 	Resume,
 	RestartLauncher,
 	SupervisedRestartLauncher,
+	ReloadMain,
 	HdmiPowerCycle,
 	VideoAdjust,
 	VideoReinit,

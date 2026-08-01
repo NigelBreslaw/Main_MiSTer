@@ -45,6 +45,7 @@ static const char s_events_path[] = "/tmp/mister-magik/events.jsonl";
 static const char s_input_policy_path[] = "/tmp/mister-magik/input-policy";
 static const char s_restart_token_path[] = "/tmp/mister-magik/launcher-restart-token";
 static const char s_restart_used_path[] = "/tmp/mister-magik/launcher-restart-used";
+static const char s_local_dev_main_path[] = "/media/fat/MiSTer_MagiKDev";
 static const char s_boot_id_path[] = "/proc/sys/kernel/random/boot_id";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
 static const char s_ready_fifo_path[] = "/tmp/mister-magik/launcher-ready-v1";
@@ -1088,6 +1089,35 @@ static void reboot_launcher(void)
 	eventf("launcher_reboot_spawned", "pid=%d", pid);
 }
 
+static void reload_local_main(void)
+{
+	if (s_state != MagikLauncherState::LauncherActive)
+	{
+		reply_commandf("rejected %s", magik_launcher_state_name(s_state));
+		return;
+	}
+	if (strcmp(s_executable_path, s_local_dev_main_path))
+	{
+		mister_magik_command_reply("rejected local-dev-main-unavailable");
+		eventf("launcher_main_reload_rejected", "running=%s target=%s", s_executable_path, s_local_dev_main_path);
+		return;
+	}
+	if (access(s_local_dev_main_path, X_OK) != 0)
+	{
+		mister_magik_command_reply("rejected local-dev-main-unavailable");
+		eventf("launcher_main_reload_rejected", "target=%s errno=%d", s_local_dev_main_path, errno);
+		return;
+	}
+
+	mister_magik_command_reply("ok MainReloading");
+	if (!begin_reboot_lockdown("main-reload")) return;
+	if (!enter_bootstrap_black("main-reload"))
+		eventf("launcher_main_reload_black_failed", "path=%s", s_local_dev_main_path);
+	eventf("launcher_main_reload_exec", "path=%s latch=%s", s_local_dev_main_path, magik_latch_menu_path());
+	sync();
+	app_restart(magik_latch_menu_path(), NULL, s_local_dev_main_path);
+}
+
 static void direct_reset_launcher(bool pre_sync)
 {
 	if (!begin_reboot_lockdown(pre_sync ? "direct-reset" : "direct-reset-no-sync"))
@@ -1513,6 +1543,11 @@ static void process_command_line(const char *line)
 			s_launcher_active_reply_pending = false;
 			reply_commandf("error %s", s_last_restart_error);
 		}
+		return;
+	}
+	if (cmd.type == MagikLauncherCommandType::ReloadMain)
+	{
+		reload_local_main();
 		return;
 	}
 	if (cmd.type == MagikLauncherCommandType::HdmiPowerCycle)
@@ -2059,6 +2094,7 @@ void mister_magik_status_write(void)
 	fprintf(f, "\"crash_count\":%lu,", s_crash_count);
 	fprintf(f, "\"restart_count\":%lu,", s_restart_count);
 	fprintf(f, "\"supervised_restart_available\":%s,", supervised_restart_available() ? "true" : "false");
+	fprintf(f, "\"local_main_reload_supported\":true,");
 	fprintf(f, "\"last_crash_reason\":");
 	json_escape(f, s_last_crash_reason);
 	fprintf(f, ",\"last_crash_report\":");

@@ -211,6 +211,7 @@ grep -q 'mister_magik_supervised_restart_launcher' "$ROOT/support/mister_magik/l
 grep -q 'mister_magik_reload_main' "$ROOT/support/mister_magik/launcher_command.cpp"
 grep -q 'local_main_reload_supported' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'app_restart(magik_latch_menu_path(), NULL, s_local_dev_main_path)' "$ROOT/support/mister_magik/launcher.cpp"
+grep -Fq 'make clean && make' "$ROOT/build-container.sh"
 grep -q 'launcher-restart-token' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'launcher-restart-used' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'module_loaded != scanout_slots_module_loaded' "$ROOT/support/mister_magik/launcher.cpp"

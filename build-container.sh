@@ -72,5 +72,5 @@ container run --arch arm64 --rm \
   --volume "$HERE:/src" \
   --workdir /src \
   "$IMAGE" \
-  sh -lc 'export PATH=/usr/local/bin/gcc-arm-10.2-2020.11-aarch64-arm-none-linux-gnueabihf/bin:$PATH; make "$@"' \
+  sh -lc 'export PATH=/usr/local/bin/gcc-arm-10.2-2020.11-aarch64-arm-none-linux-gnueabihf/bin:$PATH; if [ "$#" -eq 2 ] && [ "$1" = clean ] && [ "$2" = all ]; then make clean && make; else make "$@"; fi' \
   sh "$@"

@@ -174,6 +174,10 @@ Build/docs/test changes may touch:
 - `scripts/`
 - `tests/`
 
+`build-container.sh clean all` is the canonical local experiment build. The
+wrapper maps that conventional clean-build spelling to `make clean && make`
+because upstream Main's Makefile has no explicit `all` target.
+
 ## Implemented Features And Tests
 
 - Exclusive FPGA ownership update: the launcher lifecycle transfers SPI/GPO

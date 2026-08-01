@@ -882,3 +882,7 @@ compatibility to `MiSTer_MagiKDev`:
   readable latch path checks. It no longer serializes a whole-platform hash
   pass before loading the latch; full transaction identity remains enforced at
   deployment and the final launcher preflight is unchanged in this commit.
+- Final launcher preflight no longer repeats deployment's manifest and SHA-256
+  validation on every process start. Runtime checks retain launcher
+  readability/executability, scanout module/device readiness, and the existing
+  protocol/capability readiness report before ownership transfer and reveal.

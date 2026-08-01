@@ -64,67 +64,6 @@ static const char *layout_path(const char *relative)
 	return out;
 }
 
-static const char *artifact_verify_command()
-{
-	static char command[8192];
-	snprintf(command, sizeof(command),
-	"set -e; "
-	"app=%s; "
-	"manifest=$app/platform-v3.manifest; "
-	"get() { value=$(sed -n \"s/^$1=//p\" \"$manifest\"); test -n \"$value\"; test \"$(grep -c \"^$1=\" \"$manifest\")\" -eq 1; printf %%s \"$value\"; }; "
-	"main=%s; "
-	"gui=$app/mister-magik-fb; "
-	"module=$app/mister_magik_scanout_slots.ko; "
-	"module_meta=$app/mister_magik_scanout_slots.metadata.txt; "
-	"rbf=$app/fpga/menu-magik-vblank-latch.rbf; "
-	"rbf_meta=$app/fpga/menu-magik-vblank-latch.metadata.txt; "
-	"test -r \"$manifest\" -a -r \"$main\" -a -r \"$gui\" -a -r \"$module\" -a -r \"$module_meta\" -a -r \"$rbf\" -a -r \"$rbf_meta\"; "
-	"test \"$(get format)\" = mister-magik-platform-v3; "
-	"release=$(get platform_release); "
-	"release_number=$(get platform_release_number); "
-	"bundle_id=$(get platform_bundle_id); "
-	"candidate_id=$(get qualification_candidate_id); "
-	"test \"$release\" = \"platform-v0.$release_number\"; "
-	"case \"$release_number\" in ''|*[!0-9]*|0) exit 1;; esac; "
-	"test ${#bundle_id} -eq 64 -a ${#candidate_id} -eq 64; "
-	"case \"$bundle_id$candidate_id\" in *[!0-9a-f]*) exit 1;; esac; "
-	"test \"$(get latch_protocol_version)\" = 4; "
-	"test \"$(get latch_capability_mask)\" = 0x01ff; "
-	"test \"$(get main_path)\" = \"$main\"; "
-	"test \"$(get gui_path)\" = \"$gui\"; "
-	"test \"$(get scanout_module_path)\" = \"$module\"; "
-	"test \"$(get scanout_metadata_path)\" = \"$module_meta\"; "
-	"test \"$(get latch_rbf_path)\" = \"$rbf\"; "
-	"test \"$(get latch_metadata_path)\" = \"$rbf_meta\"; "
-	"main_hash=$(get main_sha256); "
-	"gui_hash=$(get gui_sha256); "
-	"module_hash=$(get scanout_module_sha256); "
-	"module_meta_hash=$(get scanout_metadata_sha256); "
-	"rbf_hash=$(get latch_rbf_sha256); "
-	"rbf_meta_hash=$(get latch_metadata_sha256); "
-	"contract=$(get platform_contract_sha256); "
-	"main_revision=$(get main_revision); "
-	"magik_revision=$(get magik_revision); "
-	"menu_revision=$(get menu_revision); "
-	"test ${#main_hash} -eq 64 -a ${#gui_hash} -eq 64 -a ${#module_hash} -eq 64 -a ${#module_meta_hash} -eq 64 -a ${#rbf_hash} -eq 64 -a ${#rbf_meta_hash} -eq 64 -a ${#contract} -eq 64; "
-	"test ${#main_revision} -eq 40 -a ${#magik_revision} -eq 40 -a ${#menu_revision} -eq 40; "
-	"case \"$main_hash$gui_hash$module_hash$module_meta_hash$rbf_hash$rbf_meta_hash$contract$main_revision$magik_revision$menu_revision\" in *[!0-9a-f]*) exit 1;; esac; "
-	"test \"$(sha256sum \"$main\" | awk '{print $1}')\" = \"$main_hash\"; "
-	"test \"$(sha256sum \"$gui\" | awk '{print $1}')\" = \"$gui_hash\"; "
-	"test \"$(sha256sum \"$module\" | awk '{print $1}')\" = \"$module_hash\"; "
-	"test \"$(sha256sum \"$module_meta\" | awk '{print $1}')\" = \"$module_meta_hash\"; "
-	"test \"$(sha256sum \"$rbf\" | awk '{print $1}')\" = \"$rbf_hash\"; "
-	"test \"$(sha256sum \"$rbf_meta\" | awk '{print $1}')\" = \"$rbf_meta_hash\"; "
-	"grep -qx \"platform_contract_sha256=$contract\" \"$module_meta\"; "
-	"grep -qx \"platform_contract_sha256=$contract\" \"$rbf_meta\"; "
-	"grep -qx \"module_sha256=$module_hash\" \"$module_meta\"; "
-	"grep -qx \"rbf_sha256=$rbf_hash\" \"$rbf_meta\"; "
-	"grep -qx \"source_commit=$menu_revision\" \"$rbf_meta\"; "
-	"grep -qx \"latch_protocol_version=4\" \"$rbf_meta\"; "
-	"grep -qx \"latch_capability_mask=0x01ff\" \"$rbf_meta\"",
-	magik_app_dir(), magik_main_path());
-	return command;
-}
 static const int s_maintenance_poll_ms = 1000;
 static const unsigned long s_heartbeat_ms = 5000;
 static const int s_vt = 2;
@@ -1785,16 +1724,16 @@ static bool run_launcher_readiness_preflight(const char *path)
 	}
 	close(log_fd);
 
-	event_jsonl("launcher_verification_begin", "scope=full-platform");
-	int verification_status = system(artifact_verify_command());
-	event_jsonl(
-	    "launcher_verification_end",
-	    verification_status == 0 ? "result=passed" : "result=failed");
-	if (verification_status != 0)
+	if (access(path, R_OK | X_OK) != 0)
 	{
-		eventf("launcher_preflight_failed", "stage=artifact-identity");
+		eventf(
+		    "launcher_preflight_failed",
+		    "stage=launcher-executable path=%s errno=%d",
+		    path,
+		    errno);
 		return false;
 	}
+	event_jsonl("launcher_executable_ready", path);
 
 	if (access("/dev/mister-magik-scanout-slots", R_OK | W_OK) != 0)
 	{
@@ -1855,7 +1794,7 @@ static bool run_launcher_readiness_preflight(const char *path)
 
 	eventf(
 	    "launcher_preflight_passed",
-	    "protocol=4 capabilities=0x01ff identity=verified");
+	    "protocol=4 capabilities=0x01ff identity=deployment-verified");
 	event_jsonl("launcher_preflight_end", "result=passed");
 	return true;
 }

@@ -865,3 +865,12 @@ compatibility to `MiSTer_MagiKDev`:
 - This entry describes a candidate, not a qualified release. GitHub platform
   build completion, four-path 30 fps USB Video review, and the complete
   latch/platform qualification remain required before promotion.
+
+2026-08-01 local Main return profiling:
+
+- Main event records and status now include `CLOCK_BOOTTIME` timestamps in
+  microseconds while retaining the millisecond fields used by existing tools.
+- The return path records process entry, return-command receipt, latch
+  resolution and verification, launcher verification and preflight, child
+  spawn, and the launcher exec boundary. These markers make the black interval
+  attributable without including host polling latency.

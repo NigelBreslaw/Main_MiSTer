@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
@@ -211,6 +212,14 @@ static void clear_input_policy_marker(void)
 }
 
 static void eventf(const char *event, const char *fmt, ...);
+
+static unsigned long long boot_time_us()
+{
+	struct timespec now = {};
+	if (clock_gettime(CLOCK_BOOTTIME, &now) != 0) return 0;
+	return ((unsigned long long)now.tv_sec * 1000000ULL) +
+	       ((unsigned long long)now.tv_nsec / 1000ULL);
+}
 static void set_status_string(char *dst, size_t len, const char *fmt, ...);
 static void read_trimmed(const char *path, char *buf, size_t len);
 
@@ -507,6 +516,7 @@ static void write_crash_report_file(const char *report_id, const char *path, pid
 	fprintf(f, "\"kind\":"); json_escape(f, kind ? kind : "child-exit");
 	fprintf(f, ",\"report_id\":"); json_escape(f, report_id);
 	fprintf(f, ",\"ts_boot_ms\":%lu", GetTimer(0));
+	fprintf(f, ",\"ts_boot_us\":%llu", boot_time_us());
 	fprintf(f, ",\"pid\":%d", getpid());
 	fprintf(f, ",\"main\":{");
 	fprintf(f, "\"state\":"); json_escape(f, magik_launcher_state_name(s_state));
@@ -631,7 +641,12 @@ static void event_jsonl(const char *event, const char *detail)
 	ensure_status_dir();
 	FILE *f = fopen(s_events_path, "a");
 	if (!f) return;
-	fprintf(f, "{\"ts_boot_ms\":%lu,\"source\":\"main\",\"pid\":%d,\"event\":", GetTimer(0), getpid());
+	fprintf(
+	    f,
+	    "{\"ts_boot_ms\":%lu,\"ts_boot_us\":%llu,\"source\":\"main\",\"pid\":%d,\"event\":",
+	    GetTimer(0),
+	    boot_time_us(),
+	    getpid());
 	json_escape(f, event ? event : "unknown");
 	fprintf(f, ",\"detail\":");
 	json_escape(f, detail ? detail : "");
@@ -1474,6 +1489,10 @@ static void process_command_line(const char *line)
 	}
 	if (cmd.type == MagikLauncherCommandType::ReturnToLauncher)
 	{
+		eventf(
+		    "return_command_received",
+		    "state=%s",
+		    magik_launcher_state_name(s_state));
 		if (s_state == MagikLauncherState::LauncherActive)
 			mister_magik_command_reply("ok LauncherActive");
 		else
@@ -1754,6 +1773,7 @@ static bool wait_for_preflight_child(pid_t pid, const char *stage)
 
 static bool run_launcher_readiness_preflight(const char *path)
 {
+	event_jsonl("launcher_preflight_begin", path);
 	int log_fd = open(
 	    "/tmp/mister-magik-slint.log",
 	    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
@@ -1765,7 +1785,12 @@ static bool run_launcher_readiness_preflight(const char *path)
 	}
 	close(log_fd);
 
-	if (system(artifact_verify_command()) != 0)
+	event_jsonl("launcher_verification_begin", "scope=full-platform");
+	int verification_status = system(artifact_verify_command());
+	event_jsonl(
+	    "launcher_verification_end",
+	    verification_status == 0 ? "result=passed" : "result=failed");
+	if (verification_status != 0)
 	{
 		eventf("launcher_preflight_failed", "stage=artifact-identity");
 		return false;
@@ -1831,6 +1856,7 @@ static bool run_launcher_readiness_preflight(const char *path)
 	eventf(
 	    "launcher_preflight_passed",
 	    "protocol=4 capabilities=0x01ff identity=verified");
+	event_jsonl("launcher_preflight_end", "result=passed");
 	return true;
 }
 
@@ -1960,6 +1986,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	    fpga_io_owner_name(),
 	    (unsigned long long)fpga_io_owner_epoch());
 
+	event_jsonl("launcher_child_spawn_begin", "executable=/sbin/agetty");
 	s_pid = fork();
 	if (s_pid < 0)
 	{
@@ -1976,6 +2003,9 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	{
 		setenv("MISTER_MAGIK_PATH", path, 1);
 		setsid();
+		event_jsonl(
+		    "launcher_exec_begin",
+		    "executable=/sbin/agetty launcher=/tmp/mister_magik_launcher");
 		execl("/sbin/agetty", "/sbin/agetty", "-a", "root", "-l", s_script_path, "-i", "--nohostname", "-L", s_tty, "linux", NULL);
 		_exit(127);
 	}
@@ -2070,6 +2100,7 @@ void mister_magik_status_write(void)
 	fprintf(f, "{");
 	fprintf(f, "\"schema\":\"mister-magik-main-status-v2\",");
 	fprintf(f, "\"ts_boot_ms\":%lu,", GetTimer(0));
+	fprintf(f, "\"ts_boot_us\":%llu,", boot_time_us());
 	fprintf(f, "\"pid\":%d,", getpid());
 	if (!s_main_generation) s_main_generation = GetTimer(0);
 	fprintf(f, "\"main_generation\":%lu,", s_main_generation);
@@ -2314,13 +2345,21 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 	if (!mister_magik_launcher_configured()) return false;
 	bool default_menu = !path || !path[0];
 	if (!default_menu && strcasecmp(path, "menu.rbf") && strcasecmp(path, "/media/fat/menu.rbf")) return false;
+	event_jsonl(
+	    "latch_resolution_begin",
+	    default_menu ? "source=default-menu" : path);
 	const char *latch_rbf_path = magik_latch_menu_path();
 	if (access(latch_rbf_path, R_OK) != 0)
 	{
 		eventf("latch_menu_rbf_missing", "path=%s", latch_rbf_path);
 		return false;
 	}
-	if (system(artifact_verify_command()) != 0)
+	event_jsonl("latch_verification_begin", "scope=full-platform");
+	int verification_status = system(artifact_verify_command());
+	event_jsonl(
+	    "latch_verification_end",
+	    verification_status == 0 ? "result=passed" : "result=failed");
+	if (verification_status != 0)
 	{
 		eventf("latch_artifact_verification_failed", "fallback=stock-menu");
 		return false;
@@ -2329,6 +2368,11 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 	magik_launcher_mark_latch_menu_return(path);
 	fpga_load_rbf(latch_rbf_path);
 	return true;
+}
+
+void mister_magik_launcher_record_main_entry(const char *path)
+{
+	event_jsonl("main_process_entry", path && path[0] ? path : "(default-menu)");
 }
 
 void mister_magik_record_invariant(const char *kind, const char *detail)

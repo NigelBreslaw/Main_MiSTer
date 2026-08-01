@@ -39,6 +39,8 @@ const char *version = "$VER:" VDATE;
 
 int main(int argc, char *argv[])
 {
+	mister_magik_launcher_record_main_entry((argc > 1) ? argv[1] : "");
+
 	// Always pin main worker process to core #1 as core #0 is the
 	// hardware interrupt handler in Linux.  This reduces idle latency
 	// in the main loop by about 6-7x.

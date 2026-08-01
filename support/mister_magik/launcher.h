@@ -1,6 +1,7 @@
 #pragma once
 
 bool mister_magik_launcher_configured(void);
+void mister_magik_launcher_record_main_entry(const char *path);
 bool mister_magik_launcher_active(void);
 bool mister_magik_launcher_session_owned(void);
 bool mister_magik_launcher_input_proxy_active(void);

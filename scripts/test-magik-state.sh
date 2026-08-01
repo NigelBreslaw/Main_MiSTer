@@ -217,7 +217,7 @@ grep -q 'execl("/bin/bash", "bash", s_script_path, NULL)' "$ROOT/support/mister_
 grep -q 'mister_magik_launcher_resolve_rbf_load(name)' "$ROOT/fpga_io.cpp"
 grep -q 'direct_latch_selected' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'direct_latch_unavailable' "$ROOT/support/mister_magik/launcher.cpp"
-grep -q 'app_restart(magik_latch_menu_path(), NULL, s_local_dev_main_path)' "$ROOT/support/mister_magik/launcher.cpp"
+grep -q 'app_restart_checked(magik_latch_menu_path(), NULL, s_local_dev_main_path)' "$ROOT/support/mister_magik/launcher.cpp"
 grep -Fq 'make clean && make' "$ROOT/build-container.sh"
 grep -q 'launcher-restart-token' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'launcher-restart-used' "$ROOT/support/mister_magik/launcher.cpp"

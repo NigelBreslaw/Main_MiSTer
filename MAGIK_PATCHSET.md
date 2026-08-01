@@ -27,9 +27,11 @@ reapplied at their narrow integration seams.
 - Boot through stock `/media/fat/MiSTer` and MiSTer.ini `main=MiSTer_MagiK`.
 - Let Main initialize HDMI/video/menu-core prerequisites.
 - Keep the MagiK-specific Menu RBF's native video background solid black until
-  the first verified latch-presented MagiK frame. HDMI/CRT timing, DE/sync, and
-  downstream OSD composition remain available while native RGB is black; the
-  stock Menu RBF is unchanged.
+  the launcher reaches its internal ready boundary. Rust reports ready only
+  after two completed, advancing latch posts on alternating slots that startup
+  intended for display. HDMI/CRT timing, DE/sync, and downstream OSD
+  composition remain available while native RGB is black; the stock Menu RBF
+  is unchanged. This internal boundary does not prove physical sink visibility.
 - Establish bootstrap black immediately after `video_init()` and before every
   supervised launcher spawn. Main must disable OSD, OSD keys, launcher input,
   and LFB routing before latch preflight, then transfer FPGA ownership only
@@ -40,7 +42,11 @@ reapplied at their narrow integration seams.
   reassert the launcher framebuffer mux for a resolved Direct Video route
   before transferring FPGA ownership to Rust.
 - Start MiSTer MagiK Slint on `tty2` after Main video initialization.
-- Keep Main in dormant launcher mode while Slint owns the visible launcher UI.
+- Enter `LauncherStarting` after spawning Slint and reserve
+  `LauncherActive` for the accepted token- and PID-bound ready report. Keep
+  stock Main scheduler, OSD, input, and framebuffer work suppressed throughout
+  startup, active, suspend, reboot, and crash ownership states.
+- Keep Main in dormant launcher mode while Slint owns the launcher UI.
   Dormant launcher mode blocks on the command FIFO and supervised-child exit,
   with a bounded maintenance timeout, so Main does not burn CPU1 or wake at a
   fixed high rate while waiting for Slint or launcher commands.
@@ -65,9 +71,15 @@ reapplied at their narrow integration seams.
   - `mister_magik_hdmi_power_cycle`
   - `mister_magik_video_adjust`
   - `mister_magik_video_reinit`
+
+  `mister_magik_video_reinit` is accepted only from `LauncherActive` because it
+  stops the supervised child; startup cannot be diverted around bounded ready
+  recovery.
 - Source `/media/fat/mister-magik/launcher.env` from the generated launcher
   script before starting Slint, so tooling can benchmark the real launcher
-  Arcade screen without direct Rust launches.
+  Arcade screen without direct Rust launches. Main re-exports its fresh
+  per-spawn ready token and FIFO path after sourcing the file, so local
+  configuration cannot substitute a stale readiness identity.
 - Use Main's original loaders after handoff for `.mra`/`.mgl`/`.rbf` launch.
 - Carry MagiK structured launch plans through Main's re-exec path as a
   `magik-plan-v1:` argument and seed the existing MGL action state directly,
@@ -189,6 +201,30 @@ Build/docs/test changes may touch:
   failure forbids spawn and permits stock OSD recovery only after Main ownership
   is restored.
 
+- Bounded launcher readiness: `ChildSpawned` enters `LauncherStarting`, which
+  owns and suppresses the Main session but is not active and cannot hand off a
+  core. Main creates one mode-0600 FIFO at
+  `/tmp/mister-magik/launcher-ready-v1`, generates a fresh 32-hex token for
+  every spawn, and accepts only
+  `ready-v1 token=<token> pid=<supervised-pid>`. Rust emits that one-way message
+  only after two already-confirmed latch completions intended for display have
+  advancing sequence and route epochs on alternating slots. There is no reply
+  FIFO, content sampling, route lease, or duplicate Rust status mirror.
+  Main waits eight seconds per attempt. The first timeout or pre-ready child
+  exit stops and reaps the child and retries the complete supervised start
+  once. The second failure stops the child, rolls a provisional display change
+  back to its prior timing when applicable, restores stable stock Menu, and
+  completes any pending command reply with an error. Display-apply and launcher
+  restart/resume replies remain pending until ready succeeds or final recovery
+  fails. Polling, timeout, and child reaping continue while Main owns the
+  session even if the launcher executable disappears after spawn.
+  `main-status.json` exposes only the ready phase, attempt, remaining deadline,
+  and last failure. Host tests cover exact parsing and stale identity rejection,
+  deadline boundaries, the single retry, ordered child-stop/rollback/Menu/reply
+  recovery, command polling during Starting, and rejection of video reinit
+  outside Active. Physical HDMI/CRT visibility remains an attended USB-video
+  qualification concern rather than a claim of this internal handshake.
+
 Update this section in every PR that adds behavior.
 
 - PR 1: provenance docs, patch ledger, container build wrapper.
@@ -275,8 +311,9 @@ Update this section in every PR that adds behavior.
   black source remains visible during preflight.
 - Launcher reveal update: Main reasserts bootstrap black before every
   supervised launcher spawn, including resume/restart/crash paths. Rust keeps
-  its cleared-black startup frame; the first verified latch post is the only
-  route transition that can reveal the MagiK UI.
+  its cleared-black startup frame and uses the two-post internal ready boundary
+  before Main marks the launcher active; physical reveal is qualified
+  separately at the USB-video sink.
 - Return reveal update: launcher scripts spawned from `menu.rbf` set
   `MISTER_MAGIK_RETURN_TO_LAUNCHER=1`, allowing Rust to skip the startup splash
   on game return and reveal only the first real launcher frame. The explicit
@@ -381,9 +418,11 @@ Update this section in every PR that adds behavior.
   `mister_magik_video_reinit` stops/suspends the Slint child, temporarily
   releases MagiK video suppression, disables the HPS framebuffer, reruns Main's
   existing `video_reinit()` path, and leaves the launcher suspended for visual
-  inspection. These are attended diagnostic levers, not automatic recovery or
-  normal launcher lifecycle commands; host parser tests cover their command
-  names and type labels.
+  inspection. Reinit is rejected outside `LauncherActive`, including during
+  `LauncherStarting`, so it cannot reap the child behind the readiness state
+  machine. These are attended diagnostic levers, not automatic recovery or
+  normal launcher lifecycle commands; host parser and state tests cover their
+  command names, type labels, and reinit gate.
 - Production FPGA latch startup update: MagiK menu boots now treat an empty
   core path or `menu.rbf` as the default Menu core and redirect to
   `/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf` when it is
@@ -418,7 +457,11 @@ Update this section in every PR that adds behavior.
   It also compiles the production bootstrap sequencer and injects every
   fail-closed boundary, while source invariants prove the production launcher
   orders black, preflight, ownership transfer, and fork and uses only the
-  canonical framebuffer-disable word.
+  canonical framebuffer-disable word. The same suite compiles the launcher
+  readiness parser and recovery planner, rejects malformed/stale token and PID
+  reports, checks the eight-second boundary, and proves first-failure retry then
+  ordered child stop, display rollback, stock Menu convergence, and delayed
+  command failure on the final attempt.
 - `scripts/check-magik-patch-surface.sh` compares this fork with the upstream
   release baseline and fails if files outside the approved patch surface
   changed, including the narrow structured-handoff allowance for
@@ -478,12 +521,13 @@ State-changing MagiK commands have a paired reply FIFO at
 `ok <state>`, `rejected <state>`, or `error <reason>`. Successful handoff replies
 mean that Main accepted a readable launch payload and began the handoff; they
 are written before Main terminates the supervised Slint child, not after the
-core loader returns. `ok LauncherActive` means Main successfully spawned the
-supervised launcher child and entered its `LauncherActive` state. It does not
-claim that the child has completed `exec` or rendered its first frame. Callers
-must serialize commands and drain any abandoned reply immediately before
-writing a new command. A caller must retain serialization ownership until it
-reads the reply or Main closes the channel; heartbeat failure starts supervisor
+core loader returns. `ok LauncherActive` means Main accepted the supervised
+child's token- and PID-bound internal ready report after the required two latch
+completions. It does not claim that HDMI, CRT, or any other physical sink is
+visible. Callers must serialize commands and drain any abandoned reply
+immediately before writing a new command. A caller must retain serialization
+ownership until it reads the reply or Main closes the channel; heartbeat
+failure starts supervisor
 recovery but does not permit another command against the same Main process.
 There is no command timeout that can abandon a delayed reply while Main remains
 alive. Legacy generic `load_core` commands do not write replies. Main also

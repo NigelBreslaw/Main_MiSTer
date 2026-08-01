@@ -116,9 +116,12 @@ reapplied at their narrow integration seams.
   Linux. The command is accepted only from `LauncherActive` while the running
   executable is `/media/fat/MiSTer_MagiKDev`; Main acknowledges, stops and
   reaps Slint, enters bootstrap black, syncs, and re-execs that explicit path
-  against the already-loaded latch RBF. Status advertises the capability so the
-  host uses a Linux reboot only for the initial installation or bounded
-  recovery.
+  against the already-loaded latch RBF. The old Main remains alive until a
+  close-on-exec status pipe proves the replacement exec; fork/exec failure is
+  reported without calling the reset manager so the host transaction retains
+  rollback and the sole bounded recovery-reboot decision. Status advertises the
+  capability so the host uses a Linux reboot only for the initial installation
+  or bounded recovery.
 - Treat an unexpected Slint child exit as a MagiK-owned crash-recovery state:
   keep Main UI/OSD/framebuffer paths suppressed, keep polling lifecycle
   commands, and allow `mister_magik_restart_launcher` to respawn Slint.

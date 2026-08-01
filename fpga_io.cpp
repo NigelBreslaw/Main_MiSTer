@@ -8,7 +8,9 @@
 #include <termios.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <pthread.h>
+#include <fcntl.h>
 
 #include "fpga_io.h"
 #include "file_io.h"
@@ -730,7 +732,7 @@ char *getappname()
 	return dest;
 }
 
-void app_restart(const char *path, const char *xml, const char *exe)
+bool app_restart_checked(const char *path, const char *xml, const char *exe)
 {
 	sync();
 	fpga_core_reset(1);
@@ -743,17 +745,73 @@ void app_restart(const char *path, const char *xml, const char *exe)
 	const char *appname = exe ? exe : getappname();
 	printf("restarting to %s\n", appname);
 
-	//a cleaner way to re-start
-	pid_t child = fork();
-	if (child > 0) _exit(0);
-	else if (child == 0)
+	int exec_status[2];
+	if (pipe(exec_status) < 0)
 	{
-		setsid();
-		pid_t grandchild = fork();
-		if (grandchild > 0) _exit(0);
-		if (grandchild == 0) execl(appname, appname, path, xml, NULL);
+		printf("Unable to create restart status pipe: %s\n", strerror(errno));
+		return false;
+	}
+	if (fcntl(exec_status[0], F_SETFD, FD_CLOEXEC) < 0 ||
+	    fcntl(exec_status[1], F_SETFD, FD_CLOEXEC) < 0)
+	{
+		int pipe_errno = errno;
+		close(exec_status[0]);
+		close(exec_status[1]);
+		errno = pipe_errno;
+		printf("Unable to protect restart status pipe: %s\n", strerror(pipe_errno));
+		return false;
 	}
 
+	// Keep the current process alive until the replacement has proved exec.
+	pid_t child = fork();
+	if (child > 0)
+	{
+		close(exec_status[1]);
+		int exec_errno = 0;
+		ssize_t result;
+		do result = read(exec_status[0], &exec_errno, sizeof(exec_errno));
+		while (result < 0 && errno == EINTR);
+		close(exec_status[0]);
+		if (result == 0) _exit(0);
+		waitpid(child, NULL, 0);
+		if (result != (ssize_t)sizeof(exec_errno)) exec_errno = EIO;
+		errno = exec_errno;
+		printf("Unable to exec replacement %s: %s\n", appname, strerror(exec_errno));
+		return false;
+	}
+	else if (child == 0)
+	{
+		close(exec_status[0]);
+		setsid();
+		pid_t grandchild = fork();
+		if (grandchild > 0)
+		{
+			close(exec_status[1]);
+			_exit(0);
+		}
+		if (grandchild == 0)
+		{
+			execl(appname, appname, path, xml, NULL);
+			int exec_errno = errno;
+			write(exec_status[1], &exec_errno, sizeof(exec_errno));
+			_exit(1);
+		}
+		int fork_errno = errno;
+		write(exec_status[1], &fork_errno, sizeof(fork_errno));
+		_exit(1);
+	}
+	int fork_errno = errno;
+	close(exec_status[0]);
+	close(exec_status[1]);
+	errno = fork_errno;
+	printf("Unable to fork replacement %s: %s\n", appname, strerror(fork_errno));
+	return false;
+}
+
+
+void app_restart(const char *path, const char *xml, const char *exe)
+{
+	if (app_restart_checked(path, xml, exe)) return;
 	printf("Something went wrong. Rebooting...\n");
 	reboot(1);
 	_exit(1);

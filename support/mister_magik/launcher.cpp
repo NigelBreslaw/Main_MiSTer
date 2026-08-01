@@ -1069,7 +1069,11 @@ static void reload_local_main(void)
 		eventf("launcher_main_reload_black_failed", "path=%s", s_local_dev_main_path);
 	eventf("launcher_main_reload_exec", "path=%s latch=%s", s_local_dev_main_path, magik_latch_menu_path());
 	sync();
-	app_restart(magik_latch_menu_path(), NULL, s_local_dev_main_path);
+	if (!app_restart_checked(magik_latch_menu_path(), NULL, s_local_dev_main_path))
+	{
+		eventf("launcher_main_reload_failed", "stage=exec path=%s errno=%d", s_local_dev_main_path, errno);
+		reboot_log("main_reload_failed", "stage=exec path=%s errno=%d", s_local_dev_main_path, errno);
+	}
 }
 
 static void direct_reset_launcher(bool pre_sync)

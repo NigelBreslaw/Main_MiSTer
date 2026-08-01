@@ -878,3 +878,7 @@ compatibility to `MiSTer_MagiKDev`:
   Menu bitstream is opened or loaded. The inherited one-shot return marker is
   preserved for the final launcher, while an unavailable latch falls back once
   to the unchanged stock Menu path with an explicit diagnostic.
+- Initial/default latch selection now uses only the configured launcher and
+  readable latch path checks. It no longer serializes a whole-platform hash
+  pass before loading the latch; full transaction identity remains enforced at
+  deployment and the final launcher preflight is unchanged in this commit.

@@ -2383,16 +2383,6 @@ bool mister_magik_launcher_maybe_load_latch_menu(const char *path)
 		eventf("latch_menu_rbf_missing", "path=%s", latch_rbf_path);
 		return false;
 	}
-	event_jsonl("latch_verification_begin", "scope=full-platform");
-	int verification_status = system(artifact_verify_command());
-	event_jsonl(
-	    "latch_verification_end",
-	    verification_status == 0 ? "result=passed" : "result=failed");
-	if (verification_status != 0)
-	{
-		eventf("latch_artifact_verification_failed", "fallback=stock-menu");
-		return false;
-	}
 	eventf("latch_menu_rbf_load", "from=%s to=%s", default_menu ? "(default-menu)" : path, latch_rbf_path);
 	magik_launcher_mark_latch_menu_return(path);
 	fpga_load_rbf(latch_rbf_path);

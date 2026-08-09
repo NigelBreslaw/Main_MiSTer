@@ -1856,8 +1856,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	}
 
 	char path[2100];
-	strncpy(path, getFullPath(magik_launcher_relative_path()), sizeof(path) - 1);
-	path[sizeof(path) - 1] = '\0';
+	magik_app_path(path, sizeof(path), "mister-magik-fb");
 	if (!enter_bootstrap_black("supervised-spawn"))
 	{
 		set_status_string(
@@ -1868,7 +1867,7 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
-	if (!FileExists(magik_launcher_relative_path(), 0))
+	if (access(path, F_OK) != 0)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
 		eventf("launcher_missing", "path=%s", magik_launcher_relative_path());
@@ -2010,7 +2009,9 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 
 bool mister_magik_launcher_configured(void)
 {
-	return FileExists(magik_launcher_relative_path(), 0) != 0;
+	char path[2100];
+	magik_app_path(path, sizeof(path), "mister-magik-fb");
+	return access(path, F_OK) == 0;
 }
 
 const char *mister_magik_launcher_resolve_rbf_load(const char *path)

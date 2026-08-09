@@ -156,7 +156,8 @@ Runtime changes should stay in or immediately around:
   hook and the testable framework-word builder used by Main's existing
   `user_io_send_buttons()` path
 - `input.cpp` only for MagiK simple joystick policy gating, MagiK-owned
-  baseline-map loading, and the launcher menu-input proxy
+  baseline-map loading, and the launcher menu-input proxy including preserving
+  Main's generic command poll result outside launcher mode
 - `joymapping.cpp` only for applying MagiK-provided simple-mode button override
   tokens by MRA button index
 - `scheduler.cpp` dormant-mode polling seam
@@ -429,6 +430,20 @@ Update this section in every PR that adds behavior.
   The previous signal disposition is restored after each command/SIGCHLD wait.
   Host tests cover proxy key translation, timeout, FIFO wake, and child-exit
   wake behavior.
+- Generic command FIFO dispatch fix: MagiK's launcher-input multiplexing now
+  restores its saved command `pollfd` only when launcher mode temporarily
+  replaced that entry. The unconditional restore previously reinstated the
+  pre-poll `revents` value, initially `-1`, after handoff to a game. Main then
+  repeatedly entered its inherited nonblocking command reader; after one real
+  `screenshot` read, negative reads re-dispatched the static buffer's previous
+  contents. The fix leaves Main's generic reader and command behavior unchanged
+  and limits MagiK's descriptor substitution to launcher ownership. The host
+  suite binds this invariant to the command-poll seam.
+- Launcher path-isolation fix: MagiK's support layer resolves and checks its
+  executable with its own absolute path plus `access()`. It no longer calls
+  Main's shared `getFullPath()` or `FileExists()` helpers, so launcher
+  maintenance cannot overwrite the buffer used by Main's asynchronous
+  screenshot worker. Main's scaler and screenshot implementation stay stock.
 - Attended display diagnostics update: Main accepts three explicit
   MagiK FIFO commands for rare HDMI/scaler bad-state experiments without a
   Linux reboot. `mister_magik_hdmi_power_cycle` toggles ADV7513 HDMI power.
@@ -523,6 +538,12 @@ Update this section in every PR that adds behavior.
   voluntary wakeups and command-FIFO reads per second while remaining
   responsive to `mister_magik_launch`, `mister_magik_restart_launcher`, and
   crash recovery commands.
+- Generic screenshot-command behavior must be verified through the typed agent
+  after deploying the exact clean Main commit. Each of three independent MagiK
+  handoffs to Pac-Man Plus writes `screenshot\n` exactly once as soon as
+  `pacplus` is reported, allows up to five seconds for the asynchronous save,
+  and requires exactly one new nonempty screenshot before returning to
+  `LauncherActive`.
 - Production latch boot must prove all three live signals after reboot or game
   return: Main command line contains
   `/media/fat/mister-magik/fpga/menu-magik-vblank-latch.rbf`,
@@ -531,6 +552,36 @@ Update this section in every PR that adds behavior.
   results.
 
 ## Device Smoke Results
+
+### Issue #46 pre-fix reproduction
+
+On 2026-08-09, the development Main launched Pac-Man Plus through MiSTer MagiK.
+One `screenshot\n` write to `/dev/MiSTer_cmd` produced two new screenshots in
+nine seconds. The bounded agent probe then returned Main to the launcher and
+confirmed `LauncherActive`. This is pre-fix evidence only; the required
+post-fix acceptance is the three-trial check above.
+
+The matched stock-Main baseline on the same device loaded Pac-Man Plus through
+Main's public `load_core` command, then produced exactly one new nonempty
+screenshot from one `screenshot\n` write during a 30-second observation and
+returned to `MENU`. Earlier read-guard candidates produced zero screenshots and
+were discarded; the final patch restores the inherited reader unchanged.
+
+Further bounded tracing showed that the MagiK handoff consumed one command,
+accepted one screenshot request, captured the scaler, and queued the worker.
+The worker resolved
+`/media/fat/screenshots/pacplus/20260809_125548-screen.png`, but the shared
+`getFullPath()` buffer changed to
+`/media/fat/mister-magik-dev/mister-magik-fb` before Imlib completed and the
+save failed. The final fix therefore combines the command-poll ownership guard
+with MagiK-local launcher path resolution, leaving Main's scaler untouched.
+
+The exact runtime tree in this patch passed the post-fix check on 2026-08-09.
+Three independent MagiK handoffs reported
+`pacplus` after 400 ms; each single `screenshot\n` write produced exactly one
+new nonempty screenshot after 100 ms. Counts advanced from 6 to 7, 7 to 8, and
+8 to 9. Every trial returned to `LauncherActive`, and fault arming was clear
+before each launch.
 
 ### Acknowledged command-channel status
 

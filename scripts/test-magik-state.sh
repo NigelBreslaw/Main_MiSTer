@@ -96,6 +96,23 @@ if [ "$(grep -c 'magik_input_proxy_allows_fpga_output(launcher_mode)' "$ROOT/inp
   exit 1
 fi
 
+awk '
+  index($0, "struct pollfd command_poll = pool[NUMDEV + 1];") { saved = NR }
+  saved && index($0, "int return_value = poll(pool, NUMDEV + 3, timeout);") { polled = NR }
+  polled && NR > polled && NR <= polled + 6 &&
+    index($0, "if (launcher_mode) pool[NUMDEV + 1] = command_poll;") { safe = 1 }
+  END { exit !(saved && polled && safe) }
+' "$ROOT/input.cpp" || {
+  echo "ERROR: generic command FIFO poll results must survive outside launcher mode" >&2
+  exit 1
+}
+
+grep -Fq 'magik_app_path(path, sizeof(path), "mister-magik-fb");' "$ROOT/support/mister_magik/launcher.cpp" &&
+! grep -Eq 'getFullPath\(|FileExists\(' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: MagiK launcher checks must not mutate Main's shared path buffer" >&2
+  exit 1
+}
+
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/tests/user_io_config_map_test.cpp" \
   -o "$OUT-user-io-config-map"

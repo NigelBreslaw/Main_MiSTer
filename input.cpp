@@ -5822,7 +5822,7 @@ static int input_test(int getchar, bool launcher_mode, int launcher_command_fd, 
 			int return_value = poll(pool, NUMDEV + 3, timeout);
 			bool launcher_command_ready = launcher_mode &&
 				(pool[NUMDEV + 1].revents & POLLIN);
-			pool[NUMDEV + 1] = command_poll;
+			if (launcher_mode) pool[NUMDEV + 1] = command_poll;
 			if (!return_value) break;
 			if (launcher_command_ready) break;
 

@@ -413,12 +413,15 @@ Update this section in every PR that adds behavior.
   parse MRA XML or classify labels such as coin/start/pause; all arcade policy
   remains in MagiK.
 - Launcher input proxy update: before spawning Rust, Main initializes its stock
-  evdev/uinput subsystem and advertises `MISTER_MAGIK_INPUT_PROXY=1`. While
+  evdev/uinput subsystem and advertises `MISTER_MAGIK_INPUT_PROXY=1` plus
+  `MISTER_MAGIK_INPUT_PROXY_PROTOCOL=2`. While
   `LauncherActive`, the normal mapping path remains responsible for user menu
   maps, gamecontrollerdb fallback, controller quirks, analogue thresholds,
   custom Menu OK/Back, combinations, and hot-plug discovery. Resolved menu
-  actions are translated to a stable virtual-key protocol and written through
-  `MiSTer virtual input`; no OSD or core action is performed. The launcher poll
+  actions, including resolved physical-keyboard menu keys, are aggregated by
+  logical action and translated to a stable virtual-key protocol. Only aggregate
+  press/release transitions are written through `MiSTer virtual input`; no OSD
+  or core action is performed and Main generates no launcher repeat. The launcher poll
   waits on evdev, hot-plug, and the launcher-owned command descriptor, but never
   consumes the command bytes. Rust therefore receives original Main semantics
   while the existing launcher command parser retains FIFO ownership.

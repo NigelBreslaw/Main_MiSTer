@@ -40,6 +40,29 @@ int magik_input_proxy_key(uint32_t mask, bool osd_button)
 	}
 }
 
+int magik_input_proxy_keyboard_key(uint16_t code)
+{
+	switch (code)
+	{
+	case MagikProxyKeyEsc:
+	case MagikProxyKeyTab:
+	case MagikProxyKeyEnter:
+	case MagikProxyKeySpace:
+	case MagikProxyKeyF9:
+	case MagikProxyKeyF10:
+	case MagikProxyKeyUp:
+	case MagikProxyKeyPageUp:
+	case MagikProxyKeyLeft:
+	case MagikProxyKeyRight:
+	case MagikProxyKeyDown:
+	case MagikProxyKeyPageDown:
+	case MagikProxyKeyMenu:
+		return code;
+	default:
+		return 0;
+	}
+}
+
 bool magik_input_proxy_allows_fpga_output(bool launcher_mode)
 {
 	return !launcher_mode;

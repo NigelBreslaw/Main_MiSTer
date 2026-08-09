@@ -24,6 +24,7 @@ enum MagikInputProxyKey
 };
 
 int magik_input_proxy_key(uint32_t mask, bool osd_button);
+int magik_input_proxy_keyboard_key(uint16_t code);
 bool magik_input_proxy_allows_fpga_output(bool launcher_mode);
 
 struct MagikInputProxyContributor

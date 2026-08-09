@@ -18,6 +18,8 @@ int main()
 	assert(magik_input_proxy_key(0x2000, false) == MagikProxyKeyF10);
 	assert(magik_input_proxy_key(0, true) == MagikProxyKeyMenu);
 	assert(magik_input_proxy_key(0x4000, false) == 0);
+	assert(magik_input_proxy_keyboard_key(MagikProxyKeyDown) == MagikProxyKeyDown);
+	assert(magik_input_proxy_keyboard_key(30) == 0);
 	assert(magik_input_proxy_allows_fpga_output(false));
 	assert(!magik_input_proxy_allows_fpga_output(true));
 
@@ -30,6 +32,10 @@ int main()
 	assert(magik_input_proxy_update(&state, 1, 10, 0x0004, 2, MagikProxyKeyDown, false, &event) == MagikInputProxyNoChange);
 	assert(magik_input_proxy_update(&state, 2, 20, 0x0004, 2, MagikProxyKeyDown, false, &event) == MagikInputProxyEmit);
 	assert(event.key == MagikProxyKeyDown && event.press == 0);
+	assert(magik_input_proxy_update(&state, 3, MagikProxyKeyDown, 0, -1, MagikProxyKeyDown, true, &event) == MagikInputProxyEmit);
+	assert(magik_input_proxy_update(&state, 4, 20, 0x0004, 2, MagikProxyKeyDown, true, &event) == MagikInputProxyNoChange);
+	assert(magik_input_proxy_update(&state, 3, MagikProxyKeyDown, 0, -1, MagikProxyKeyDown, false, &event) == MagikInputProxyNoChange);
+	assert(magik_input_proxy_update(&state, 4, 20, 0x0004, 2, MagikProxyKeyDown, false, &event) == MagikInputProxyEmit);
 	assert(magik_input_proxy_update(&state, 2, 20, 0x0004, 2, MagikProxyKeyDown, false, &event) == MagikInputProxyUnmatchedRelease);
 
 	assert(magik_input_proxy_update(&state, 1, 30, 0x0010, 4, MagikProxyKeyEnter, true, &event) == MagikInputProxyEmit);

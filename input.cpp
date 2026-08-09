@@ -3965,6 +3965,29 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 			// keyboard
 			else
 			{
+				if (mister_magik_launcher_input_proxy_active() && ev->value <= 1)
+				{
+					int key = magik_input_proxy_keyboard_key(ev->code);
+					if (key)
+					{
+						MagikInputProxyEvent event = {};
+						MagikInputProxyUpdate update = magik_input_proxy_update(
+							&magik_proxy_state,
+							NUMDEV + dev,
+							ev->code,
+							0,
+							-1,
+							key,
+							ev->value != 0,
+							&event);
+						if (update == MagikInputProxyEmit)
+							uinp_send_key((uint16_t)event.key, event.press);
+						else if (update == MagikInputProxyOverflow || update == MagikInputProxyUnmatchedRelease)
+							magik_proxy_desync_count++;
+						return;
+					}
+				}
+
 				//  replace MENU key by RGUI to allow using Right Amiga on reduced keyboards
 				// (it also disables the use of Menu for OSD)
 				if (cfg.key_menu_as_rgui && ev->code == KEY_COMPOSE) ev->code = KEY_RIGHTMETA;

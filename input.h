@@ -133,6 +133,9 @@ void input_lightgun_save(int idx, int32_t *cal);
 void input_switch(int grab);
 int input_state();
 void input_uinp_destroy();
+unsigned long input_proxy_write_failures();
+unsigned long input_proxy_journal_overflows();
+unsigned long input_proxy_desyncs();
 int input_command_fifo_ready();
 unsigned long input_command_fifo_inode();
 

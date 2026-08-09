@@ -1814,6 +1814,7 @@ static bool write_launcher_script(const char *path)
 	        "export HOME=/root\n"
 	        "export MISTER_MAGIK_PARENT=main-mister\n"
 	        "export MISTER_MAGIK_INPUT_PROXY=1\n"
+	        "export MISTER_MAGIK_INPUT_PROXY_PROTOCOL=2\n"
 	        "export MISTER_MAGIK_RETURN_TO_LAUNCHER=%d\n"
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
@@ -2118,6 +2119,10 @@ void mister_magik_status_write(void)
 	json_escape(f, s_last_operation_result);
 	fprintf(f, ",\"last_operation_ms\":%lu", s_last_operation_ms);
 	fprintf(f, ",\"launcher_active\":%s,", mister_magik_launcher_active() ? "true" : "false");
+	fprintf(f, "\"input_proxy_protocol\":2,");
+	fprintf(f, "\"input_proxy_write_failures\":%lu,", input_proxy_write_failures());
+	fprintf(f, "\"input_proxy_journal_overflows\":%lu,", input_proxy_journal_overflows());
+	fprintf(f, "\"input_proxy_desyncs\":%lu,", input_proxy_desyncs());
 	fprintf(f, "\"deploy_locked\":%s,", deploy_lock_active() ? "true" : "false");
 	fprintf(f, "\"crash_count\":%lu,", s_crash_count);
 	fprintf(f, "\"restart_count\":%lu,", s_restart_count);

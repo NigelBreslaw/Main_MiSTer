@@ -2079,6 +2079,31 @@ static uint32_t mouse_timer = 0;
 #define BTN_OSD 101
 
 static int uinp_fd = -1;
+static MagikInputProxyState magik_proxy_state = {};
+static MagikInputProxyJournal uinp_journal = {};
+static unsigned long uinp_write_failure_count = 0;
+static unsigned long uinp_journal_overflow_count = 0;
+static unsigned long magik_proxy_desync_count = 0;
+static bool magik_proxy_was_active = false;
+static bool uinp_frame_active = false;
+static size_t uinp_frame_offset = 0;
+static struct input_event uinp_frame[2] = {};
+
+unsigned long input_proxy_write_failures()
+{
+	return uinp_write_failure_count;
+}
+
+unsigned long input_proxy_journal_overflows()
+{
+	return uinp_journal_overflow_count;
+}
+
+unsigned long input_proxy_desyncs()
+{
+	return magik_proxy_desync_count;
+}
+
 static int input_uinp_setup()
 {
 	if (uinp_fd <= 0)
@@ -2108,6 +2133,9 @@ static int input_uinp_setup()
 			uinp_fd = -1;
 			return 0;
 		}
+		magik_input_proxy_journal_init(&uinp_journal);
+		uinp_frame_active = false;
+		uinp_frame_offset = 0;
 	}
 	return 1;
 }
@@ -2120,15 +2148,63 @@ void input_uinp_destroy()
 		close(uinp_fd);
 		uinp_fd = -1;
 	}
+	magik_input_proxy_init(&magik_proxy_state);
+	magik_input_proxy_journal_init(&uinp_journal);
+	magik_proxy_was_active = false;
+	uinp_frame_active = false;
+	uinp_frame_offset = 0;
 }
 
 static unsigned long uinp_repeat = 0;
 static struct input_event uinp_ev;
+static void uinp_flush()
+{
+	if (uinp_fd <= 0) return;
+	for (;;)
+	{
+		if (!uinp_frame_active)
+		{
+			MagikInputProxyEvent pending = {};
+			if (!magik_input_proxy_journal_front(&uinp_journal, &pending)) return;
+			memset(uinp_frame, 0, sizeof(uinp_frame));
+			gettimeofday(&uinp_frame[0].time, NULL);
+			uinp_frame[0].type = EV_KEY;
+			uinp_frame[0].code = pending.key;
+			uinp_frame[0].value = pending.press;
+			uinp_frame[1].time = uinp_frame[0].time;
+			uinp_frame[1].type = EV_SYN;
+			uinp_frame[1].code = SYN_REPORT;
+			uinp_frame_active = true;
+			uinp_frame_offset = 0;
+		}
+
+		const unsigned char *bytes = reinterpret_cast<const unsigned char *>(uinp_frame);
+		size_t remaining = sizeof(uinp_frame) - uinp_frame_offset;
+		ssize_t written = write(uinp_fd, bytes + uinp_frame_offset, remaining);
+		if (written > 0)
+		{
+			uinp_frame_offset += (size_t)written;
+			if (uinp_frame_offset < sizeof(uinp_frame)) continue;
+			magik_input_proxy_journal_pop(&uinp_journal);
+			uinp_frame_active = false;
+			uinp_frame_offset = 0;
+			continue;
+		}
+		if (written < 0 && errno == EINTR) continue;
+		if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+		uinp_write_failure_count++;
+		magik_input_proxy_journal_pop(&uinp_journal);
+		uinp_frame_active = false;
+		uinp_frame_offset = 0;
+		return;
+	}
+}
+
 static void uinp_send_key(uint16_t key, int press)
 {
 	if (uinp_fd > 0)
 	{
-		if (!uinp_ev.value && press)
+		if (!mister_magik_launcher_input_proxy_active() && !uinp_ev.value && press)
 		{
 			uinp_repeat = GetTimer(REPEATDELAY);
 		}
@@ -2138,22 +2214,46 @@ static void uinp_send_key(uint16_t key, int press)
 		uinp_ev.type = EV_KEY;
 		uinp_ev.code = key;
 		uinp_ev.value = press;
-		write(uinp_fd, &uinp_ev, sizeof(uinp_ev));
-
-		static struct input_event ev;
-		ev.time = uinp_ev.time;
-		ev.type = EV_SYN;
-		ev.code = SYN_REPORT;
-		ev.value = 0;
-		write(uinp_fd, &ev, sizeof(ev));
+		if (!magik_input_proxy_journal_push(&uinp_journal, {(int)key, press}))
+		{
+			uinp_journal_overflow_count++;
+			return;
+		}
+		uinp_flush();
 	}
+}
+
+static void magik_proxy_reset(bool emit_releases)
+{
+	int released_keys[256] = {};
+	size_t released = magik_input_proxy_reset(
+		&magik_proxy_state,
+		released_keys,
+		sizeof(released_keys) / sizeof(released_keys[0]));
+	if (!emit_releases) return;
+	for (size_t i = 0; i < released && i < sizeof(released_keys) / sizeof(released_keys[0]); i++)
+		uinp_send_key((uint16_t)released_keys[i], 0);
+}
+
+static void magik_proxy_sync_lifecycle()
+{
+	bool active = mister_magik_launcher_input_proxy_active();
+	if (active == magik_proxy_was_active) return;
+	magik_proxy_reset(magik_proxy_was_active);
+	magik_proxy_was_active = active;
 }
 
 static void uinp_check_key()
 {
+	magik_proxy_sync_lifecycle();
+	uinp_flush();
 	if (uinp_fd > 0)
 	{
-		if (!grabbed)
+		if (mister_magik_launcher_input_proxy_active())
+		{
+			return;
+		}
+		else if (!grabbed)
 		{
 			if (uinp_ev.value && CheckTimer(uinp_repeat))
 			{
@@ -2410,10 +2510,27 @@ uint32_t build_autofire_mask(int player)
 
 static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int bnum, int dont_save = 0)
 {
+	magik_proxy_sync_lifecycle();
 	if (mister_magik_launcher_input_proxy_active())
 	{
 		int key = magik_input_proxy_key(mask, bnum == BTN_OSD);
-		if (key) uinp_send_key(key, press);
+		if (key)
+		{
+			MagikInputProxyEvent event = {};
+			MagikInputProxyUpdate update = magik_input_proxy_update(
+				&magik_proxy_state,
+				jnum,
+				code,
+				mask,
+				bnum,
+				key,
+				press != 0,
+				&event);
+			if (update == MagikInputProxyEmit)
+				uinp_send_key((uint16_t)event.key, event.press);
+			else if (update == MagikInputProxyOverflow || update == MagikInputProxyUnmatchedRelease)
+				magik_proxy_desync_count++;
+		}
 		return;
 	}
 
@@ -5717,6 +5834,7 @@ static int input_test(int getchar, bool launcher_mode, int launcher_command_fd, 
 
 			if ((pool[NUMDEV].revents & POLLIN) && check_devs())
 			{
+				magik_proxy_reset(mister_magik_launcher_input_proxy_active());
 				printf("Close all devices.\n");
 				for (int i = 0; i < NUMDEV; i++) if (pool[i].fd >= 0)
 				{

@@ -18,10 +18,15 @@ bool magik_launcher_mark_latch_menu_return(const char *path)
 	return true;
 }
 
-bool magik_launcher_consume_return_spawn(const char *rbf_name, const char *rbf_path)
+bool magik_launcher_return_spawn_pending(const char *rbf_name, const char *rbf_path)
 {
 	const char *marked = getenv(s_return_env);
-	bool return_spawn = is_menu_path(rbf_name) || is_menu_path(rbf_path) || (marked && !strcmp(marked, "1"));
+	return is_menu_path(rbf_name) || is_menu_path(rbf_path) || (marked && !strcmp(marked, "1"));
+}
+
+bool magik_launcher_consume_return_spawn(const char *rbf_name, const char *rbf_path)
+{
+	bool return_spawn = magik_launcher_return_spawn_pending(rbf_name, rbf_path);
 	unsetenv(s_return_env);
 	return return_spawn;
 }

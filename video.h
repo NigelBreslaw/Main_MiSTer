@@ -36,6 +36,7 @@ extern VideoInfo current_video_info;
 void  video_init();
 void  video_reinit();
 bool  video_apply_runtime_output(const char *mode);
+bool  video_reassert_runtime_output();
 void  video_poll();
 
 int   video_get_edid(uint8_t **buf, int *size);

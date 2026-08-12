@@ -207,6 +207,17 @@ if grep -q 'library-refresh' "$ROOT/support/mister_magik/launcher.cpp"; then
   exit 1
 fi
 
+awk '
+  /void mister_magik_launcher_enter_after_menu_init\(void\)/ { in_enter=1; pending=0; restore=0; queued=0 }
+  in_enter && /magik_launcher_return_spawn_pending/ { pending=1 }
+  in_enter && /video_reassert_runtime_output/ { restore=pending }
+  in_enter && /s_spawn_pending = true/ { queued=restore; checked=1; in_enter=0 }
+  END { if (!checked || !queued) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: HDMI return recovery must inspect the marker and finish before launcher spawn is queued" >&2
+  exit 1
+}
+
 grep -q 'mister_magik_scanout_slots.ko' "$ROOT/support/mister_magik/launcher.cpp"
 grep -q 'magik_app_path' "$ROOT/support/mister_magik/launcher.cpp"
 ! grep -q '/media/fat/mister-magik/' "$ROOT/support/mister_magik/launcher.cpp"

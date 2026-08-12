@@ -2757,6 +2757,20 @@ void video_reinit()
 	return;
 }
 
+static bool video_apply_active_output(bool keep_direct_video_auto, bool restore_menu_background)
+{
+	read_edid(true);
+	hdmi_config_init();
+	hdmi_invalidate_mode_cache();
+	hdmi_config_set_hdr();
+	video_mode_load(keep_direct_video_auto);
+	video_set_mode(&v_def, 0);
+	user_io_send_buttons(1);
+	video_mode_adjust(true);
+	if (restore_menu_background) video_menu_bg(-1);
+	return true;
+}
+
 bool video_apply_runtime_output(const char *mode)
 {
 	if (!mode || !mode[0]) return false;
@@ -2793,19 +2807,23 @@ bool video_apply_runtime_output(const char *mode)
 	// the transmitter, matching the reinitialization path that recovers a link
 	// after boot. Without this, the FPGA geometry changes while HDMI can remain
 	// unsignalled after leaving direct video.
-	read_edid(true);
-	hdmi_config_init();
-	hdmi_invalidate_mode_cache();
-	hdmi_config_set_hdr();
 	// Preserve automatic sink detection only while applying auto itself. An
 	// explicit mode, including transaction rollback, must clear the static
 	// auto-routing latch before loading its saved geometry.
-	video_mode_load(auto_requested);
-	video_set_mode(&v_def, 0);
-	user_io_send_buttons(1);
-	video_mode_adjust(true);
-	video_menu_bg(-1);
-	return true;
+	return video_apply_active_output(auto_requested, true);
+}
+
+bool video_reassert_runtime_output()
+{
+	// Direct-video routes do not use the HDMI transmitter mode that this
+	// recovery reasserts. The caller also guards the route so a future caller
+	// cannot accidentally bounce a working CRT output.
+	if (cfg.direct_video) return false;
+
+	// Keep the automatic-output latch established by video_init(). This repeats
+	// the same transmitter and mode sequence used by an attended same-mode
+	// display apply without exposing Menu's background before MagiK is ready.
+	return video_apply_active_output(true, false);
 }
 
 void video_hdmi_power(int on)

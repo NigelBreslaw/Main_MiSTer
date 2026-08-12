@@ -2195,6 +2195,17 @@ void mister_magik_launcher_route_early_black(void)
 void mister_magik_launcher_enter_after_menu_init(void)
 {
 	if (!mister_magik_launcher_configured()) return;
+	bool return_spawn = magik_launcher_return_spawn_pending(get_rbf_name(), get_rbf_path());
+	if (return_spawn && !cfg.direct_video)
+	{
+		eventf("launcher_return_hdmi_restore_begin", "mode=%s", configured_display_mode());
+		bool restored = video_reassert_runtime_output();
+		eventf(
+		    "launcher_return_hdmi_restore_end",
+		    "mode=%s result=%s",
+		    configured_display_mode(),
+		    restored ? "restored" : "failed");
+	}
 	clear_input_policy_marker();
 	input_prepare_launcher_proxy();
 	if (s_state == MagikLauncherState::Unconfigured)

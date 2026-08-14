@@ -202,6 +202,26 @@ if grep 'reboot(1)' "$ROOT/support/mister_magik/launcher.cpp" | grep -v 'unsafe 
   exit 1
 fi
 
+awk '
+  /static void handle_ready_failure\(const char \*reason\)/ { in_failure=1; retry_case=0; retry_return=0; stock=0; reply=0; rearm=0; forbidden=0; next }
+  in_failure && /^static bool start_display_persist\(/ {
+    if (!retry_case || !retry_return || !stock || !reply || !rearm || forbidden) exit 1
+    checked=1
+    in_failure=0
+  }
+  in_failure && /case MagikLauncherReadyRecoveryStep::Retry:/ { retry_case=1 }
+  in_failure && retry_case && /restart_launcher\(\)/ { retry_restart=1 }
+  in_failure && retry_restart && /return;/ { retry_return=1 }
+  in_failure && /case MagikLauncherReadyRecoveryStep::RestoreStockMenu:/ { stock=1 }
+  in_failure && /case MagikLauncherReadyRecoveryStep::FinishPendingReply:/ { reply=stock }
+  in_failure && /magik_launcher_ready_rearm_after_terminal_failure\(/ { rearm=reply }
+  in_failure && /(fpga_load_rbf|rbf_load|reboot\(|fpga_reset|reset_core)/ { forbidden=1 }
+  END { if (!checked) exit 1 }
+' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: readiness recovery must bound one retry, finish stock/reply recovery before rearm, and never mutate hardware" >&2
+  exit 1
+}
+
 if grep -q 'library-refresh' "$ROOT/support/mister_magik/launcher.cpp"; then
   echo "ERROR: Main must start the visible launcher before a missing catalog is rebuilt" >&2
   exit 1

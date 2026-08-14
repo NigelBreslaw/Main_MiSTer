@@ -332,9 +332,10 @@ static void ensure_ready_fifo(void)
 
 static void prepare_ready_attempt(void)
 {
-	if (!s_ready.attempt)
+	unsigned int next_attempt = magik_launcher_ready_begin_attempt(s_ready.attempt);
+	if (next_attempt != s_ready.attempt)
 	{
-		s_ready.attempt = 1;
+		s_ready.attempt = next_attempt;
 		s_ready.last_failure[0] = 0;
 	}
 	generate_ready_token(s_ready.token);
@@ -1283,6 +1284,20 @@ static void handle_ready_failure(const char *reason)
 			break;
 		}
 	}
+
+	// The retry case returns above while attempt 2 is still armed. Only the
+	// terminal path reaches here, after the incident update, stock recovery,
+	// and pending reply have completed. A later independent entry therefore
+	// receives its own bounded attempt 1 plus one fresh-child retry.
+	magik_launcher_ready_rearm_after_terminal_failure(
+	    &s_ready.phase,
+	    &s_ready.attempt,
+	    &s_ready.deadline_ms);
+	s_ready.token[0] = 0;
+	s_ready.main_pid = 0;
+	s_ready.main_generation = 0;
+	s_ready.owner_epoch = 0;
+	s_ready.incident_detected_ms = 0;
 }
 
 static bool start_display_persist()

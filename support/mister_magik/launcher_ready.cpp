@@ -112,6 +112,21 @@ bool magik_launcher_ready_timed_out(
 	return phase == MagikLauncherReadyPhase::Awaiting && deadline_ms && now_ms >= deadline_ms;
 }
 
+unsigned int magik_launcher_ready_begin_attempt(unsigned int attempt)
+{
+	return attempt ? attempt : 1;
+}
+
+void magik_launcher_ready_rearm_after_terminal_failure(
+	MagikLauncherReadyPhase *phase,
+	unsigned int *attempt,
+	unsigned long *deadline_ms)
+{
+	if (phase) *phase = MagikLauncherReadyPhase::Idle;
+	if (attempt) *attempt = 0;
+	if (deadline_ms) *deadline_ms = 0;
+}
+
 MagikLauncherReadyRecoveryPlan magik_launcher_ready_recovery_plan(
 	unsigned int attempt,
 	bool display_change_pending)

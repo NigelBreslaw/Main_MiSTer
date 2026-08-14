@@ -59,6 +59,8 @@ int main()
 	assert(magik_launcher_ready_timed_out(MagikLauncherReadyPhase::Awaiting, 8000, 8000));
 	assert(magik_launcher_ready_timed_out(MagikLauncherReadyPhase::Awaiting, 8001, 8000));
 	assert(!magik_launcher_ready_timed_out(MagikLauncherReadyPhase::Ready, 8001, 8000));
+	assert(magik_launcher_ready_begin_attempt(0) == 1);
+	assert(magik_launcher_ready_begin_attempt(2) == 2);
 
 	using Step = MagikLauncherReadyRecoveryStep;
 	const Step first_failure[] = {Step::StopChild, Step::Retry};
@@ -87,5 +89,29 @@ int main()
 		final_startup_failure,
 		3);
 	expect_steps(magik_launcher_ready_recovery_plan(0, false), final_startup_failure, 3);
+
+	MagikLauncherReadyPhase terminal_phase = MagikLauncherReadyPhase::Failed;
+	unsigned int terminal_attempt = second.next_attempt;
+	unsigned long terminal_deadline_ms = 9000;
+	magik_launcher_ready_rearm_after_terminal_failure(
+		&terminal_phase,
+		&terminal_attempt,
+		&terminal_deadline_ms);
+	assert(terminal_phase == MagikLauncherReadyPhase::Idle);
+	assert(terminal_attempt == 0);
+	assert(terminal_deadline_ms == 0);
+
+	// The next independent entry starts a new attempt 1 and once again gets
+	// exactly one fresh-child retry. Terminal recovery itself never loops.
+	unsigned int later_attempt = magik_launcher_ready_begin_attempt(terminal_attempt);
+	assert(later_attempt == 1);
+	MagikLauncherReadyRecoveryPlan later_first_failure =
+		magik_launcher_ready_recovery_plan(later_attempt, false);
+	expect_steps(later_first_failure, first_failure, 2);
+	assert(later_first_failure.next_attempt == 2);
+	expect_steps(
+		magik_launcher_ready_recovery_plan(later_first_failure.next_attempt, false),
+		final_startup_failure,
+		3);
 	return 0;
 }

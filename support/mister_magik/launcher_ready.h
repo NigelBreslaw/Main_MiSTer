@@ -64,6 +64,11 @@ bool magik_launcher_ready_timed_out(
 	MagikLauncherReadyPhase phase,
 	unsigned long now_ms,
 	unsigned long deadline_ms);
+unsigned int magik_launcher_ready_begin_attempt(unsigned int attempt);
+void magik_launcher_ready_rearm_after_terminal_failure(
+	MagikLauncherReadyPhase *phase,
+	unsigned int *attempt,
+	unsigned long *deadline_ms);
 MagikLauncherReadyRecoveryPlan magik_launcher_ready_recovery_plan(
 	unsigned int attempt,
 	bool display_change_pending);

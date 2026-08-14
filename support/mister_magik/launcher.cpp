@@ -49,7 +49,7 @@ static const char s_restart_used_path[] = "/tmp/mister-magik/launcher-restart-us
 static const char s_local_dev_main_path[] = "/media/fat/MiSTer_MagiKDev";
 static const char s_boot_id_path[] = "/proc/sys/kernel/random/boot_id";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
-static const char s_ready_fifo_path[] = "/tmp/mister-magik/launcher-ready-v1";
+static const char s_ready_fifo_path[] = "/tmp/mister-magik/launcher-ready-v2";
 static const unsigned long s_ready_timeout_ms = 8000;
 static const char *resolved_runtime_output()
 {
@@ -109,9 +109,68 @@ struct MagikReadyTransaction
 	unsigned long deadline_ms;
 	unsigned int attempt;
 	char last_failure[96];
+	unsigned long main_pid;
+	unsigned long long main_generation;
+	unsigned long long owner_epoch;
+	unsigned long incident_detected_ms;
 };
 
 static MagikReadyTransaction s_ready = {};
+
+static void write_return_incident(
+	const char *reason,
+	const char *phase,
+	const char *recovery)
+{
+	char directory[PATH_MAX];
+	char target[PATH_MAX];
+	char temporary[PATH_MAX];
+	snprintf(directory, sizeof(directory), "%s", layout_path("diagnostics"));
+	if (mkdir(directory, 0755) != 0 && errno != EEXIST) return;
+	struct stat directory_stat = {};
+	if (lstat(directory, &directory_stat) != 0 || !S_ISDIR(directory_stat.st_mode) ||
+	    S_ISLNK(directory_stat.st_mode)) return;
+	snprintf(target, sizeof(target), "%s/return-incident-current.json", directory);
+	struct stat target_stat = {};
+	if (lstat(target, &target_stat) == 0 && S_ISLNK(target_stat.st_mode)) return;
+	snprintf(
+		temporary,
+		sizeof(temporary),
+		"%s/.return-incident-%d-%lu.tmp",
+		directory,
+		getpid(),
+		GetTimer(0));
+	int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+	if (fd < 0) return;
+	int written = dprintf(
+		fd,
+		"{\"schema\":\"mister-magik-return-incident-v1\",\"detected_ms\":%lu,\"updated_ms\":%lu,\"reason\":\"%.80s\",\"phase\":\"%.40s\",\"recovery\":\"%.40s\",\"attempt\":%u,\"token\":\"%s\",\"launcher_pid\":%d,\"main_pid\":%lu,\"main_generation\":%llu,\"owner_epoch\":%llu,\"owner\":\"%s\",\"sink_visibility\":\"unobserved\"}\n",
+		s_ready.incident_detected_ms,
+		GetTimer(0),
+		reason ? reason : "launcher-ready-failed",
+		phase ? phase : "unknown",
+		recovery ? recovery : "pending",
+		s_ready.attempt,
+		s_ready.token,
+		s_pid,
+		s_ready.main_pid,
+		s_ready.main_generation,
+		s_ready.owner_epoch,
+		fpga_io_owner_name());
+	bool ok = written > 0 && written <= 4096 && fsync(fd) == 0;
+	close(fd);
+	if (!ok || rename(temporary, target) != 0)
+	{
+		unlink(temporary);
+		return;
+	}
+	int directory_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+	if (directory_fd >= 0)
+	{
+		(void)fsync(directory_fd);
+		close(directory_fd);
+	}
+}
 
 struct DisplayTransaction
 {
@@ -1172,6 +1231,8 @@ static bool restore_display_transaction(const char *return_error = NULL, bool re
 
 static void handle_ready_failure(const char *reason)
 {
+	s_ready.incident_detected_ms = GetTimer(0);
+	write_return_incident(reason, "detected", "pending");
 	set_status_string(
 	    s_ready.last_failure,
 	    sizeof(s_ready.last_failure),
@@ -1201,6 +1262,10 @@ static void handle_ready_failure(const char *reason)
 				if (s_state == MagikLauncherState::LauncherStarting)
 					transition(MagikLauncherEvent::ChildCrashed);
 			}
+			write_return_incident(
+			    reason,
+			    "ownership-restored",
+			    s_ready.attempt == 1 ? "fresh-child-retry" : "stock-fallback");
 			break;
 		case MagikLauncherReadyRecoveryStep::Retry:
 			s_ready.attempt = plan.next_attempt;
@@ -1607,13 +1672,24 @@ static void process_ready_line(const char *line)
 		    magik_launcher_ready_phase_name(s_ready.phase));
 		return;
 	}
-	if (!magik_launcher_ready_matches(report, s_ready.token, (unsigned long)s_pid))
+	if (!magik_launcher_ready_matches(
+	        report,
+	        s_ready.token,
+	        (unsigned long)s_pid,
+	        s_ready.main_pid,
+	        s_ready.main_generation,
+	        s_ready.owner_epoch))
 	{
 		eventf(
 		    "launcher_ready_rejected",
 		    "reason=stale pid=%lu supervised_pid=%d",
 		    report.pid,
 		    s_pid);
+		return;
+	}
+	if (strcmp(fpga_io_owner_name(), "magik") || fpga_io_owner_epoch() != s_ready.owner_epoch)
+	{
+		eventf("launcher_ready_rejected", "reason=ownership-changed");
 		return;
 	}
 	if (!s_bootstrap_sequence.ready(true) ||
@@ -1624,7 +1700,7 @@ static void process_ready_line(const char *line)
 	}
 	s_ready.phase = MagikLauncherReadyPhase::Ready;
 	s_ready.deadline_ms = 0;
-	set_bootstrap_phase("ready", "ready-v1");
+	set_bootstrap_phase("ready", "ready-v2");
 	eventf("launcher_ready", "attempt=%u pid=%lu", s_ready.attempt, report.pid);
 	finish_pending_launcher_active_reply();
 }
@@ -1633,7 +1709,7 @@ static void poll_ready_fifo(void)
 {
 	ensure_ready_fifo();
 	if (s_ready_fd < 0) return;
-	char buf[256];
+	char buf[1025];
 	int len = read(s_ready_fd, buf, sizeof(buf) - 1);
 	if (len <= 0) return;
 	buf[len] = 0;
@@ -1798,7 +1874,7 @@ static bool run_launcher_readiness_preflight(const char *path)
 
 	eventf(
 	    "launcher_preflight_passed",
-	    "protocol=4 capabilities=0x01ff identity=deployment-verified");
+	    "protocol=5 capabilities=0x03ff identity=deployment-verified");
 	event_jsonl("launcher_preflight_end", "result=passed");
 	return true;
 }
@@ -1821,6 +1897,9 @@ static bool write_launcher_script(const char *path)
 	        "fi\n"
 	        "export MISTER_MAGIK_STARTUP_TOKEN='%s'\n"
 	        "export MISTER_MAGIK_READY_FIFO='%s'\n"
+	        "export MISTER_MAGIK_MAIN_PID='%lu'\n"
+	        "export MISTER_MAGIK_MAIN_GENERATION='%llu'\n"
+	        "export MISTER_MAGIK_OWNER_EPOCH='%llu'\n"
 	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
 	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
 	        "export MISTER_MAGIK_DISPLAY_CONFIRM_UI=%d\n"
@@ -1837,6 +1916,9 @@ static bool write_launcher_script(const char *path)
 	        layout_path("launcher.env"),
 	        s_ready.token,
 	        s_ready_fifo_path,
+	        s_ready.main_pid,
+	        s_ready.main_generation,
+	        s_ready.owner_epoch,
 	        resolved_runtime_output(),
 	        configured_display_mode(),
 	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0);
@@ -1900,15 +1982,6 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
 	}
-	if (!write_launcher_script(path))
-	{
-		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
-		eventf("launcher_script_failed", "script=%s", s_script_path);
-		restore_stock_menu_after_failed_spawn();
-		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
-		return MagikLauncherSpawnResult::Failed;
-	}
-
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 	OsdDisable();
@@ -1923,6 +1996,18 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 		return MagikLauncherSpawnResult::Failed;
 	}
 	set_bootstrap_phase("ownership-transferred", "supervised-spawn");
+	s_ready.main_pid = (unsigned long)getpid();
+	s_ready.main_generation = s_main_generation;
+	s_ready.owner_epoch = fpga_io_owner_epoch();
+	if (!write_launcher_script(path))
+	{
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "script_failed script=%s", s_script_path);
+		eventf("launcher_script_failed", "script=%s", s_script_path);
+		restore_fpga_owner_to_main("script-write-failed");
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
 	eventf(
 	    "bootstrap_ownership_transferred",
 	    "source=supervised-spawn owner=%s epoch=%llu child=none",

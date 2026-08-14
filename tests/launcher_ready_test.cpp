@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <string.h>
 
+#include <string>
+
 #include "support/mister_magik/launcher_ready.h"
 
 static void expect_steps(
@@ -14,28 +16,43 @@ static void expect_steps(
 
 int main()
 {
+	const char *valid =
+		"ready-v2 token=0123456789abcdef0123456789abcdef pid=42 main_pid=7 main_generation=11 owner_epoch=13 protocol=5 capabilities=03ff base=229e9000 width=960 height=540 stride=1920 first_sequence=1 first_route_epoch=9 first_slot=1 first_receipt_crc=0000 second_sequence=2 second_route_epoch=10 second_slot=2 second_receipt_crc=abcd source_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef source_nonzero=99";
 	MagikLauncherReadyReport report = {};
-	assert(magik_launcher_parse_ready(
-		"ready-v1 token=0123456789abcdef0123456789abcdef pid=42",
-		&report));
+	assert(magik_launcher_parse_ready(valid, &report));
 	assert(!strcmp(report.token, "0123456789abcdef0123456789abcdef"));
 	assert(report.pid == 42);
+	assert(report.owner_epoch == 13);
+	assert(report.first_receipt_crc == 0);
+	assert(report.second_receipt_crc == 0xabcd);
 
 	const char *invalid[] = {
-		"ready-v1 token=bad pid=42",
-		"ready-v1 token=0123456789abcdef0123456789abcdef pid=0",
-		"ready-v1 token=0123456789abcdef0123456789abcdeg pid=42",
-		"ready-v1 token=0123456789abcdef0123456789abcdef pid=42 extra",
-		" ready-v1 token=0123456789abcdef0123456789abcdef pid=42",
-		"ready-v1  token=0123456789abcdef0123456789abcdef pid=42",
-		"ready-v1 token=0123456789abcdef0123456789abcdef pid=042",
-		"other-v1 token=0123456789abcdef0123456789abcdef pid=42",
+		"ready-v2 token=bad pid=42",
+		"ready-v1 token=0123456789abcdef0123456789abcdef pid=42",
+		"ready-v2 token=0123456789abcdef0123456789abcdef pid=42 main_pid=7",
+		" ready-v2 token=0123456789abcdef0123456789abcdef pid=42",
 	};
 	for (const char *line : invalid)
 		assert(!magik_launcher_parse_ready(line, &report));
-	assert(magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42));
-	assert(!magik_launcher_ready_matches(report, "1123456789abcdef0123456789abcdef", 42));
-	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 43));
+	auto replace_once = [](const char *input, const char *before, const char *after) {
+		std::string value(input);
+		size_t position = value.find(before);
+		assert(position != std::string::npos);
+		value.replace(position, strlen(before), after);
+		return value;
+	};
+	assert(!magik_launcher_parse_ready((std::string(valid) + " extra").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid, "pid=42", "pid=042").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid, "base=229e9000", "base=100000000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid, "width=960", "width=70000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid, "first_sequence=1", "first_sequence=70000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid, "source_nonzero=99", "source_nonzero=999999").c_str(), &report));
+	assert(magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42, 7, 11, 13));
+	assert(!magik_launcher_ready_matches(report, "1123456789abcdef0123456789abcdef", 42, 7, 11, 13));
+	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 43, 7, 11, 13));
+	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42, 8, 11, 13));
+	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42, 7, 12, 13));
+	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42, 7, 11, 14));
 
 	assert(!magik_launcher_ready_timed_out(MagikLauncherReadyPhase::Idle, 8000, 8000));
 	assert(!magik_launcher_ready_timed_out(MagikLauncherReadyPhase::Awaiting, 7999, 8000));

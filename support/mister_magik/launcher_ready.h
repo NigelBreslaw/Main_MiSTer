@@ -14,6 +14,25 @@ struct MagikLauncherReadyReport
 {
 	char token[33];
 	unsigned long pid;
+	unsigned long main_pid;
+	unsigned long long main_generation;
+	unsigned long long owner_epoch;
+	unsigned int protocol;
+	unsigned int capabilities;
+	unsigned long long base;
+	unsigned int width;
+	unsigned int height;
+	unsigned int stride;
+	unsigned int first_sequence;
+	unsigned int first_route_epoch;
+	unsigned int first_slot;
+	unsigned int first_receipt_crc;
+	unsigned int second_sequence;
+	unsigned int second_route_epoch;
+	unsigned int second_slot;
+	unsigned int second_receipt_crc;
+	char source_sha256[65];
+	unsigned long source_nonzero;
 };
 
 enum class MagikLauncherReadyRecoveryStep
@@ -37,7 +56,10 @@ bool magik_launcher_parse_ready(const char *line, MagikLauncherReadyReport *repo
 bool magik_launcher_ready_matches(
 	const MagikLauncherReadyReport &report,
 	const char *token,
-	unsigned long supervised_pid);
+	unsigned long supervised_pid,
+	unsigned long main_pid,
+	unsigned long long main_generation,
+	unsigned long long owner_epoch);
 bool magik_launcher_ready_timed_out(
 	MagikLauncherReadyPhase phase,
 	unsigned long now_ms,

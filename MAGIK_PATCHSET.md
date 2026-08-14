@@ -223,12 +223,24 @@ because upstream Main's Makefile has no explicit `all` target.
 - Bounded launcher readiness: `ChildSpawned` enters `LauncherStarting`, which
   owns and suppresses the Main session but is not active and cannot hand off a
   core. Main creates one mode-0600 FIFO at
-  `/tmp/mister-magik/launcher-ready-v1`, generates a fresh 32-hex token for
-  every spawn, and accepts only
-  `ready-v1 token=<token> pid=<supervised-pid>`. Rust emits that one-way message
-  only after two already-confirmed latch completions intended for display have
-  advancing sequence and route epochs on alternating slots. There is no reply
-  FIFO, content sampling, route lease, or duplicate Rust status mirror.
+  `/tmp/mister-magik/launcher-ready-v2`, generates a fresh 32-hex token for
+  every spawn, and exports the exact Main PID, Main generation, and FPGA owner
+  epoch to that child only after ownership transfer. The accepted `ready-v2`
+  record is a strict, canonical, fixed-order line no larger than 1024 bytes. It
+  binds the token and supervised child PID to that Main PID/generation and
+  owner epoch, latch protocol 5/capabilities `0x03ff`, RGB565 base and geometry,
+  two advancing completed post sequences and route epochs on alternating slots,
+  both receipt CRCs, the SHA-256 of visible RGB565 row bytes, and the visible
+  nonzero-pixel count. Unknown, missing, duplicate, reordered, noncanonical, or
+  trailing fields are rejected. Sequence and route deltas must advance within
+  the legal modulo-16-bit half-range; slots must alternate; geometry and digest
+  encodings are bounded; and the current FPGA owner name/epoch is rechecked at
+  acceptance so a stale report cannot activate the launcher.
+  Rust emits the one-way report only after two already-confirmed latch
+  completions intended for display. The source digest/nonzero statistic proves
+  the intended cached source is nonblank and the post receipts prove internal
+  transport completion; neither is described as physical HDMI/CRT visibility.
+  There is no reply FIFO, route lease, or duplicate Rust status mirror.
   Main waits eight seconds per attempt. The first timeout or pre-ready child
   exit stops and reaps the child and retries the complete supervised start
   once. The second failure stops the child, rolls a provisional display change
@@ -237,12 +249,29 @@ because upstream Main's Makefile has no explicit `all` target.
   restart/resume replies remain pending until ready succeeds or final recovery
   fails. Polling, timeout, and child reaping continue while Main owns the
   session even if the launcher executable disappears after spawn.
+  Before the first retry, Main atomically writes the bounded current incident
+  record `diagnostics/return-incident-current.json` with schema
+  `mister-magik-return-incident-v1`, the failure phase/reason, attempt, token,
+  launcher/Main identities, owner epoch/name, timestamps, recovery state, and
+  `sink_visibility="unobserved"`. Symlinked destinations and unsafe directory
+  types are rejected; incident persistence failure cannot block ownership or
+  stock-UI recovery. The same record is atomically enriched after ownership
+  recovery with `fresh-child-retry` or `stock-fallback`.
+  Terminal stock recovery rearms readiness only after the incident update,
+  stock restoration, and pending reply completion. It clears the old token,
+  spawn identity, deadline, and attempt so the next independent launcher entry
+  starts at attempt 1 and again receives exactly one fresh-child retry. The
+  immediate retry path returns while attempt 2 remains armed and is therefore
+  unchanged. Recovery never loads an RBF, resets the FPGA/core, reboots, or
+  power-cycles HDMI in response to inferred black output.
   `main-status.json` exposes only the ready phase, attempt, remaining deadline,
-  and last failure. Host tests cover exact parsing and stale identity rejection,
-  deadline boundaries, the single retry, ordered child-stop/rollback/Menu/reply
-  recovery, command polling during Starting, and rejection of video reinit
-  outside Active. Physical HDMI/CRT visibility remains an attended USB-video
-  qualification concern rather than a claim of this internal handshake.
+  and last failure. Host tests cover canonical parsing, malformed/bounded field
+  rejection, stale token/child/Main/generation/owner identity, current-owner
+  recheck, deadline boundaries, the single retry, terminal rearm, later fresh
+  retry, no retry loop, ordered child-stop/rollback/Menu/reply recovery, command
+  polling during Starting, and rejection of video reinit outside Active.
+  Physical HDMI/CRT visibility remains an attended output-capture qualification
+  concern rather than a claim of this internal handshake.
 
 Update this section in every PR that adds behavior.
 
@@ -860,6 +889,13 @@ Host tests:
   ownership-transfer, fork, and ordering failures. Failed paths must never
   reach the parent `ChildSpawned` transition and must recover stock OSD/input
   over native black.
+- Ready-v2 parser and lifecycle tests covering exact canonical serialization,
+  the 1024-byte boundary, protocol/capability, RGB565 geometry, digest/nonzero
+  bounds, advancing sequence and route epochs, alternating slots, receipt CRCs,
+  token/child/Main/generation/owner identity, current-owner recheck, one retry,
+  terminal stock fallback, post-recovery rearm, and a later independent fresh
+  retry. The terminal handler's production-order check must reject any RBF
+  load, FPGA/core reset, reboot, or HDMI mutation in readiness recovery.
 - Pinned MagiK Menu RTL/build checks proving native active RGB is zero while
   DE/sync and both HDMI and analog OSD composition paths remain connected.
 
@@ -946,3 +982,36 @@ compatibility to `MiSTer_MagiKDev`:
   validation on every process start. Runtime checks retain launcher
   readability/executability, scanout module/device readiness, and the existing
   protocol/capability readiness report before ownership transfer and reveal.
+
+2026-08-14 black-screen return recovery hardening:
+
+- Commit `7c050d1` replaces ready-v1 with the strict ready-v2 contract described
+  above. Main captures its PID/generation and the transferred FPGA owner epoch,
+  exports them to the supervised launcher, requires latch protocol 5 and
+  capabilities `0x03ff`, parses the complete record canonically, and rechecks
+  current ownership before entering `LauncherActive`.
+- Main now carries the actual receipt CRCs for both confirmed posts and accepts
+  only advancing sequence/route epochs on alternating slots. The paired Rust
+  launcher supplies the visible-row RGB565 SHA-256 and nonzero-pixel statistic.
+  This is source/transport attribution, not a claim of sink visibility.
+- A readiness failure creates or atomically updates the bounded current return
+  incident before retry/fallback. Persistence is fail-open for recovery: an I/O
+  error cannot prevent child reaping, ownership restoration, stock UI/input, or
+  pending reply completion.
+- Commit `4566825` corrects the terminal lifecycle. The immediate first-failure
+  retry remains attempt 2. Only after the second-failure incident update, stock
+  recovery, and reply completion does Main reset phase/attempt/deadline and
+  clear stale spawn identity. A later independent return therefore starts at
+  attempt 1 and again receives exactly one retry instead of inheriting a
+  permanently failed attempt-2 transaction.
+- `scripts/test-magik-state.sh` pins the production ordering and explicitly
+  forbids RBF reload, raw/core FPGA reset, reboot, or HDMI recovery mutation in
+  the readiness failure handler. `tests/launcher_ready_test.cpp` covers exact
+  parsing, identity mismatch, first retry, terminal fallback, rearm, later fresh
+  retry, and absence of a terminal retry loop.
+- These Main changes do not repair the scaler completion CDC. The paired FPGA
+  RBF owns that functional repair. Main makes activation and reveal fail-closed
+  and ensures an incomplete repair cannot leave the product indefinitely black
+  or corrupted. The exact Main/RBF/runtime tuple still requires attended
+  physical-output smoke and the declared commercial return campaign before
+  release promotion.

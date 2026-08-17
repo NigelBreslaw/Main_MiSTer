@@ -61,6 +61,10 @@ reapplied at their narrow integration seams.
   - `mister_magik_launch <absolute path>` for real `.mra`, `.mgl`, and `.rbf` paths
   - `mister_magik_launch_plan_v1 <encoded-plan>` for MagiK structured catalog rows
   - `mister_magik_exit_to_menu`
+- Add `Back to MagiK menu` as the first visible row of Main's generic
+  console/Arcade F12 menu when the matching MagiK launcher is installed. Keep
+  the first core-provided option initially focused, retain the stock Exit row,
+  and return through Main's existing `menu.rbf` load path.
 - Preserve MiSTer's public `load_core <absolute path>` contract while the
   supervised launcher owns the command FIFO. External `.mgl`, `.mra`, and
   `.rbf` requests use the same real-path handoff as MagiK-owned launches;
@@ -166,7 +170,8 @@ Runtime changes should stay in or immediately around:
   safe GPO shadow transfer, and ownership diagnostics
 - narrow command handoff wiring needed to launch through Main
 - `menu.cpp` only for the production latch RBF's logical root-level core-browser
-  identity and minimal diagnostic guards
+  identity, the generic core menu's MagiK return row, and minimal diagnostic
+  guards
 - `video.cpp` / `video.h` only for exposing existing video diagnostic
   entrypoints to MagiK command handlers and the canonical
   `UIO_SET_FBUF` bootstrap-disable primitive
@@ -881,6 +886,9 @@ Host tests:
 - Status/event contract tests.
 - Invariant event formatting tests.
 - Production latch Menu browser-path identity tests.
+- Generic core-menu source-policy checks for first-row placement, launcher
+  availability and root-page gating, core-selection index preservation, and
+  return exclusively through the existing logical `menu.rbf` path.
 - Patch-surface check.
 - Main container build.
 - Rebuild parity after env/restart changes.
@@ -1015,3 +1023,25 @@ compatibility to `MiSTer_MagiKDev`:
   or corrupted. The exact Main/RBF/runtime tuple still requires attended
   physical-output smoke and the declared commercial return campaign before
   release promotion.
+
+2026-08-17 generic core-menu MagiK return:
+
+- Main's generic console and Arcade F12 menu now prepends a Main-owned `Back to
+  MagiK menu` row when `mister_magik_launcher_configured()` confirms the
+  matching launcher is installed. The row is limited to the root core page;
+  core-defined subpages and the bespoke Minimig, Atari ST, Archimedes, SharpMZ,
+  and Menu-core interfaces are unchanged.
+- Fresh and reopened generic menus still focus the first core-provided option.
+  The new row is immediately visible above it and is reached with one Up input.
+  Core option, disabled-entry, MGL submenu, scrolling, and final stock Exit
+  indices carry the same one-entry offset in rendering and dispatch.
+- Selecting the row calls only `fpga_load_rbf("menu.rbf")`. The existing central
+  MagiK resolver selects the readable manifest-bound latch and records the
+  volatile launcher-return marker; if availability changes after the menu is
+  drawn, the established missing-latch fallback remains the unchanged stock
+  Menu path with its existing diagnostic.
+- This is a Main C++ menu feature. It adds no command or protocol, changes no
+  FPGA/RBF source, performs no direct reset or reboot, and requires no changes
+  to the Rust launcher or individual cores. Host policy checks pin the narrow
+  integration, and the standard fork host suite, patch-surface check, component
+  contract test, and Apple-container clean build provide commit assurance.

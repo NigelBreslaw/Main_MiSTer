@@ -70,6 +70,32 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   -o "$OUT-menu-path"
 "$OUT-menu-path"
 
+awk '
+  /case MENU_GENERIC_MAIN1:/ { in_render=1 }
+  in_render && /generic_magik_return = !page && mister_magik_launcher_configured\(\)/ { gate=NR }
+  in_render && /Back to MagiK menu/ { row=NR }
+  in_render && /add options as requested by core/ { core=NR }
+  in_render && /entry == \(generic_magik_return \? 1 : 0\)/ { empty_guard=1 }
+  /case MENU_GENERIC_MAIN2:/ { in_render=0; in_action=1 }
+  in_action && /generic_magik_return && menusub == 0 && select/ { return_branch=1 }
+  return_branch && /fpga_load_rbf\("menu.rbf"\)/ { menu_load=1 }
+  return_branch && /(reboot\(|fpga_core_reset|magik_latch_menu_path|menu-magik.*\.rbf)/ { unsafe=1 }
+  in_action && /uint32_t entry = generic_magik_return \? 1 : 0/ { selection_offset=1 }
+  /case MENU_GENERIC_FILE_SELECTED:/ { in_action=0; return_branch=0 }
+  END {
+    exit !(gate && row && core && gate < row && row < core && empty_guard &&
+           menu_load && selection_offset && !unsafe)
+  }
+' "$ROOT/menu.cpp" || {
+  echo "ERROR: generic core menu must prepend the gated MagiK return through menu.rbf only" >&2
+  exit 1
+}
+
+if [ "$(grep -Fc 'menusub = mister_magik_launcher_configured() ? 1 : 0;' "$ROOT/menu.cpp")" -ne 2 ]; then
+  echo "ERROR: fresh and reopened generic menus must initially focus the first core option" >&2
+  exit 1
+fi
+
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/layout.cpp" \
   "$ROOT/tests/layout_test.cpp" \

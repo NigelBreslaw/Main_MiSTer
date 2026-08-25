@@ -16,15 +16,22 @@ static void expect_steps(
 
 int main()
 {
-	const char *valid =
+	const char *valid_v3 =
+		"ready-v3 token=0123456789abcdef0123456789abcdef pid=42 main_pid=7 main_generation=11 owner_epoch=13 protocol=5 capabilities=03ff base=229e9000 width=960 height=540 stride=1920 first_sequence=1 first_route_epoch=9 first_slot=1 first_receipt_crc=0000 second_sequence=2 second_route_epoch=10 second_slot=2 second_receipt_crc=abcd source_nonblank=1";
+	const char *valid_v2 =
 		"ready-v2 token=0123456789abcdef0123456789abcdef pid=42 main_pid=7 main_generation=11 owner_epoch=13 protocol=5 capabilities=03ff base=229e9000 width=960 height=540 stride=1920 first_sequence=1 first_route_epoch=9 first_slot=1 first_receipt_crc=0000 second_sequence=2 second_route_epoch=10 second_slot=2 second_receipt_crc=abcd source_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef source_nonzero=99";
 	MagikLauncherReadyReport report = {};
-	assert(magik_launcher_parse_ready(valid, &report));
+	assert(magik_launcher_parse_ready(valid_v3, &report));
 	assert(!strcmp(report.token, "0123456789abcdef0123456789abcdef"));
+	assert(report.ready_version == 3);
+	assert(report.source_nonblank);
 	assert(report.pid == 42);
 	assert(report.owner_epoch == 13);
 	assert(report.first_receipt_crc == 0);
 	assert(report.second_receipt_crc == 0xabcd);
+	assert(magik_launcher_parse_ready(valid_v2, &report));
+	assert(report.ready_version == 2);
+	assert(report.source_nonblank);
 
 	const char *invalid[] = {
 		"ready-v2 token=bad pid=42",
@@ -41,12 +48,14 @@ int main()
 		value.replace(position, strlen(before), after);
 		return value;
 	};
-	assert(!magik_launcher_parse_ready((std::string(valid) + " extra").c_str(), &report));
-	assert(!magik_launcher_parse_ready(replace_once(valid, "pid=42", "pid=042").c_str(), &report));
-	assert(!magik_launcher_parse_ready(replace_once(valid, "base=229e9000", "base=100000000").c_str(), &report));
-	assert(!magik_launcher_parse_ready(replace_once(valid, "width=960", "width=70000").c_str(), &report));
-	assert(!magik_launcher_parse_ready(replace_once(valid, "first_sequence=1", "first_sequence=70000").c_str(), &report));
-	assert(!magik_launcher_parse_ready(replace_once(valid, "source_nonzero=99", "source_nonzero=999999").c_str(), &report));
+	assert(!magik_launcher_parse_ready((std::string(valid_v3) + " extra").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "pid=42", "pid=042").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "base=229e9000", "base=100000000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "width=960", "width=70000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "first_sequence=1", "first_sequence=70000").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "source_nonblank=1", "source_nonblank=0").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v3, "source_nonblank=1", "source_nonblank=2").c_str(), &report));
+	assert(!magik_launcher_parse_ready(replace_once(valid_v2, "source_nonzero=99", "source_nonzero=999999").c_str(), &report));
 	assert(magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 42, 7, 11, 13));
 	assert(!magik_launcher_ready_matches(report, "1123456789abcdef0123456789abcdef", 42, 7, 11, 13));
 	assert(!magik_launcher_ready_matches(report, "0123456789abcdef0123456789abcdef", 43, 7, 11, 13));

@@ -230,13 +230,14 @@ because upstream Main's Makefile has no explicit `all` target.
   core. Main creates one mode-0600 FIFO at
   `/tmp/mister-magik/launcher-ready-v2`, generates a fresh 32-hex token for
   every spawn, and exports the exact Main PID, Main generation, and FPGA owner
-  epoch to that child only after ownership transfer. The accepted `ready-v2`
+  epoch to that child only after ownership transfer. The preferred `ready-v3`
   record is a strict, canonical, fixed-order line no larger than 1024 bytes. It
   binds the token and supervised child PID to that Main PID/generation and
   owner epoch, latch protocol 5/capabilities `0x03ff`, RGB565 base and geometry,
   two advancing completed post sequences and route epochs on alternating slots,
-  both receipt CRCs, the SHA-256 of visible RGB565 row bytes, and the visible
-  nonzero-pixel count. Unknown, missing, duplicate, reordered, noncanonical, or
+  both receipt CRCs, and a nonblank visible RGB565 source assertion. Main also
+  accepts the strict legacy `ready-v2` SHA-256/count form for rollback. Unknown,
+  missing, duplicate, reordered, noncanonical, or
   trailing fields are rejected. Sequence and route deltas must advance within
   the legal modulo-16-bit half-range; slots must alternate; geometry and digest
   encodings are bounded; and the current FPGA owner name/epoch is rechecked at

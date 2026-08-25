@@ -1912,6 +1912,7 @@ static bool write_launcher_script(const char *path)
 	        "fi\n"
 	        "export MISTER_MAGIK_STARTUP_TOKEN='%s'\n"
 	        "export MISTER_MAGIK_READY_FIFO='%s'\n"
+	        "export MISTER_MAGIK_READY_WIRE_VERSION=3\n"
 	        "export MISTER_MAGIK_MAIN_PID='%lu'\n"
 	        "export MISTER_MAGIK_MAIN_GENERATION='%llu'\n"
 	        "export MISTER_MAGIK_OWNER_EPOCH='%llu'\n"

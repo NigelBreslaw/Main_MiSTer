@@ -13,6 +13,7 @@ enum class MagikLauncherReadyPhase
 struct MagikLauncherReadyReport
 {
 	char token[33];
+	unsigned int ready_version;
 	unsigned long pid;
 	unsigned long main_pid;
 	unsigned long long main_generation;
@@ -31,8 +32,7 @@ struct MagikLauncherReadyReport
 	unsigned int second_route_epoch;
 	unsigned int second_slot;
 	unsigned int second_receipt_crc;
-	char source_sha256[65];
-	unsigned long source_nonzero;
+	bool source_nonblank;
 };
 
 enum class MagikLauncherReadyRecoveryStep

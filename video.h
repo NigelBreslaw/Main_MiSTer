@@ -35,6 +35,9 @@ struct VideoInfo
 extern VideoInfo current_video_info;
 
 void  video_init();
+void  video_reinit();
+bool  video_apply_runtime_output(const char *mode);
+bool  video_reassert_runtime_output();
 void  video_poll();
 
 int   video_get_edid(uint8_t **buf, int *size);
@@ -65,6 +68,7 @@ void  video_mode_adjust(bool force = false);
 int   hasAPI1_5();
 
 void video_fb_enable(int enable, int n = 0);
+int video_magik_enter_bootstrap_black();
 int video_fb_state();
 void video_menu_bg(int n, int idle = 0);
 int video_bg_has_picture();

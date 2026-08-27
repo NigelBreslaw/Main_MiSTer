@@ -48,6 +48,7 @@ as rotated copies of the first 128 entries.  -- AMR
 #include "profiling.h"
 
 #include "support.h"
+#include "support/mister_magik/launcher.h"
 
 #define OSDLINELEN       256       // single line length in bytes
 #define OSD_CMD_WRITE    0x20      // OSD write video data command
@@ -500,6 +501,12 @@ void OsdClear(void)
 // enable displaying of OSD
 void OsdEnable(unsigned char mode)
 {
+	if (mister_magik_launcher_session_owned())
+	{
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "OsdEnable");
+		return;
+	}
+
 	user_io_osd_key_enable(mode & DISABLE_KEYBOARD);
 	mode &= (DISABLE_KEYBOARD | OSD_MSG);
 	spi_osd_cmd(OSD_CMD_ENABLE | mode);
@@ -507,6 +514,12 @@ void OsdEnable(unsigned char mode)
 
 void InfoEnable(int x, int y, int width, int height)
 {
+	if (mister_magik_launcher_session_owned())
+	{
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "InfoEnable");
+		return;
+	}
+
 	user_io_osd_key_enable(0);
 	spi_osd_cmd_cont(OSD_CMD_ENABLE | OSD_INFO);
 	spi_w(x);
@@ -536,6 +549,12 @@ void OsdDisable()
 
 void OsdMenuCtl(int en)
 {
+	if (mister_magik_launcher_session_owned())
+	{
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", en ? "OsdMenuCtl enable" : "OsdMenuCtl disable");
+		return;
+	}
+
 	if (en)
 	{
 		spi_osd_cmd(OSD_CMD_WRITE | 8);
@@ -662,6 +681,12 @@ char* OsdCoreNameGet()
 
 void OsdUpdate()
 {
+	if (mister_magik_launcher_session_owned())
+	{
+		mister_magik_record_invariant("unexpected_osd_call_while_launcher_owned", "OsdUpdate");
+		return;
+	}
+
 	PROFILE_FUNCTION();
 	int n = is_menu() ? 19 : osd_size;
 	for (int i = 0; i < n; i++)

@@ -36,6 +36,9 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "file_io.h"
+#include "support/mister_magik/layout.h"
+#include "support/mister_magik/launcher.h"
+#include "support/mister_magik/input_proxy.h"
 
 #define NUMDEV 30
 #define UINPUT_NAME "MiSTer virtual input"
@@ -1690,6 +1693,46 @@ void sysled_enable(int en)
 }
 
 #define JOYMAP_DIR  "inputs/"
+static const char MAGIK_INPUT_POLICY_PATH[] = "/tmp/mister-magik/input-policy";
+static char *get_unique_mapping(int dev, int force_unique = 0);
+
+static bool magik_simple_input_active()
+{
+	FILE *f = fopen(MAGIK_INPUT_POLICY_PATH, "r");
+	if (!f) return false;
+
+	char buf[32] = {};
+	bool active = fgets(buf, sizeof(buf), f) && !strncmp(buf, "simple", 6);
+	fclose(f);
+	return active;
+}
+
+static int magik_load_simple_map(int dev, void *pBuffer, int size)
+{
+	char path[256] = {};
+	char input_dir[256] = {};
+	char *id = get_unique_mapping(dev);
+	magik_app_path(input_dir, sizeof(input_dir), "input");
+	snprintf(path, sizeof(path), "%s/input_%s%s_v3.map", input_dir, id, input[dev].mod ? "_m" : "");
+
+	FILE *f = fopen(path, "rb");
+	if (!f) return 0;
+
+	int ret = 0;
+	if (pBuffer && size > 0)
+	{
+		ret = fread(pBuffer, 1, size, f);
+	}
+	else
+	{
+		if (!fseek(f, 0, SEEK_END)) ret = ftell(f);
+	}
+	fclose(f);
+
+	if (ret > 0) printf("MiSTer MagiK simple input: loaded %s (%d bytes)\n", path, ret);
+	return ret;
+}
+
 static int load_map(const char *name, void *pBuffer, int size)
 {
 	char path[256] = { JOYMAP_DIR };
@@ -1824,7 +1867,7 @@ int get_map_advance()
 	return (mapping && !is_menu() && map_advance_timer && CheckTimer(map_advance_timer));
 }
 
-static char *get_unique_mapping(int dev, int force_unique = 0)
+static char *get_unique_mapping(int dev, int force_unique)
 {
 	uint32_t vidpid = (input[dev].vid << 16) | input[dev].pid;
 	static char str[128];
@@ -2036,6 +2079,31 @@ static uint32_t mouse_timer = 0;
 #define BTN_OSD 101
 
 static int uinp_fd = -1;
+static MagikInputProxyState magik_proxy_state = {};
+static MagikInputProxyJournal uinp_journal = {};
+static unsigned long uinp_write_failure_count = 0;
+static unsigned long uinp_journal_overflow_count = 0;
+static unsigned long magik_proxy_desync_count = 0;
+static bool magik_proxy_was_active = false;
+static bool uinp_frame_active = false;
+static size_t uinp_frame_offset = 0;
+static struct input_event uinp_frame[2] = {};
+
+unsigned long input_proxy_write_failures()
+{
+	return uinp_write_failure_count;
+}
+
+unsigned long input_proxy_journal_overflows()
+{
+	return uinp_journal_overflow_count;
+}
+
+unsigned long input_proxy_desyncs()
+{
+	return magik_proxy_desync_count;
+}
+
 static int input_uinp_setup()
 {
 	if (uinp_fd <= 0)
@@ -2065,6 +2133,9 @@ static int input_uinp_setup()
 			uinp_fd = -1;
 			return 0;
 		}
+		magik_input_proxy_journal_init(&uinp_journal);
+		uinp_frame_active = false;
+		uinp_frame_offset = 0;
 	}
 	return 1;
 }
@@ -2077,15 +2148,63 @@ void input_uinp_destroy()
 		close(uinp_fd);
 		uinp_fd = -1;
 	}
+	magik_input_proxy_init(&magik_proxy_state);
+	magik_input_proxy_journal_init(&uinp_journal);
+	magik_proxy_was_active = false;
+	uinp_frame_active = false;
+	uinp_frame_offset = 0;
 }
 
 static unsigned long uinp_repeat = 0;
 static struct input_event uinp_ev;
+static void uinp_flush()
+{
+	if (uinp_fd <= 0) return;
+	for (;;)
+	{
+		if (!uinp_frame_active)
+		{
+			MagikInputProxyEvent pending = {};
+			if (!magik_input_proxy_journal_front(&uinp_journal, &pending)) return;
+			memset(uinp_frame, 0, sizeof(uinp_frame));
+			gettimeofday(&uinp_frame[0].time, NULL);
+			uinp_frame[0].type = EV_KEY;
+			uinp_frame[0].code = pending.key;
+			uinp_frame[0].value = pending.press;
+			uinp_frame[1].time = uinp_frame[0].time;
+			uinp_frame[1].type = EV_SYN;
+			uinp_frame[1].code = SYN_REPORT;
+			uinp_frame_active = true;
+			uinp_frame_offset = 0;
+		}
+
+		const unsigned char *bytes = reinterpret_cast<const unsigned char *>(uinp_frame);
+		size_t remaining = sizeof(uinp_frame) - uinp_frame_offset;
+		ssize_t written = write(uinp_fd, bytes + uinp_frame_offset, remaining);
+		if (written > 0)
+		{
+			uinp_frame_offset += (size_t)written;
+			if (uinp_frame_offset < sizeof(uinp_frame)) continue;
+			magik_input_proxy_journal_pop(&uinp_journal);
+			uinp_frame_active = false;
+			uinp_frame_offset = 0;
+			continue;
+		}
+		if (written < 0 && errno == EINTR) continue;
+		if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+		uinp_write_failure_count++;
+		magik_input_proxy_journal_pop(&uinp_journal);
+		uinp_frame_active = false;
+		uinp_frame_offset = 0;
+		return;
+	}
+}
+
 static void uinp_send_key(uint16_t key, int press)
 {
 	if (uinp_fd > 0)
 	{
-		if (!uinp_ev.value && press)
+		if (!mister_magik_launcher_input_proxy_active() && !uinp_ev.value && press)
 		{
 			uinp_repeat = GetTimer(REPEATDELAY);
 		}
@@ -2095,22 +2214,46 @@ static void uinp_send_key(uint16_t key, int press)
 		uinp_ev.type = EV_KEY;
 		uinp_ev.code = key;
 		uinp_ev.value = press;
-		write(uinp_fd, &uinp_ev, sizeof(uinp_ev));
-
-		static struct input_event ev;
-		ev.time = uinp_ev.time;
-		ev.type = EV_SYN;
-		ev.code = SYN_REPORT;
-		ev.value = 0;
-		write(uinp_fd, &ev, sizeof(ev));
+		if (!magik_input_proxy_journal_push(&uinp_journal, {(int)key, press}))
+		{
+			uinp_journal_overflow_count++;
+			return;
+		}
+		uinp_flush();
 	}
+}
+
+static void magik_proxy_reset(bool emit_releases)
+{
+	int released_keys[256] = {};
+	size_t released = magik_input_proxy_reset(
+		&magik_proxy_state,
+		released_keys,
+		sizeof(released_keys) / sizeof(released_keys[0]));
+	if (!emit_releases) return;
+	for (size_t i = 0; i < released && i < sizeof(released_keys) / sizeof(released_keys[0]); i++)
+		uinp_send_key((uint16_t)released_keys[i], 0);
+}
+
+static void magik_proxy_sync_lifecycle()
+{
+	bool active = mister_magik_launcher_input_proxy_active();
+	if (active == magik_proxy_was_active) return;
+	magik_proxy_reset(magik_proxy_was_active);
+	magik_proxy_was_active = active;
 }
 
 static void uinp_check_key()
 {
+	magik_proxy_sync_lifecycle();
+	uinp_flush();
 	if (uinp_fd > 0)
 	{
-		if (!grabbed)
+		if (mister_magik_launcher_input_proxy_active())
+		{
+			return;
+		}
+		else if (!grabbed)
 		{
 			if (uinp_ev.value && CheckTimer(uinp_repeat))
 			{
@@ -2367,6 +2510,30 @@ uint32_t build_autofire_mask(int player)
 
 static void joy_digital(int jnum, uint32_t mask, uint32_t code, char press, int bnum, int dont_save = 0)
 {
+	magik_proxy_sync_lifecycle();
+	if (mister_magik_launcher_input_proxy_active())
+	{
+		int key = magik_input_proxy_key(mask, bnum == BTN_OSD);
+		if (key)
+		{
+			MagikInputProxyEvent event = {};
+			MagikInputProxyUpdate update = magik_input_proxy_update(
+				&magik_proxy_state,
+				jnum,
+				code,
+				mask,
+				bnum,
+				key,
+				press != 0,
+				&event);
+			if (update == MagikInputProxyEmit)
+				uinp_send_key((uint16_t)event.key, event.press);
+			else if (update == MagikInputProxyOverflow || update == MagikInputProxyUnmatchedRelease)
+				magik_proxy_desync_count++;
+		}
+		return;
+	}
+
 	int num = jnum - 1;
 	if (num < NUMPLAYERS)
 	{
@@ -3004,15 +3171,18 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 		}
 		else if (input[dev].quirk != QUIRK_PDSP && input[dev].quirk != QUIRK_MSSP)
 		{
-			if (!load_map(get_map_name(dev, 1), &input[dev].mmap, sizeof(input[dev].mmap)))
+			bool simple_input = magik_simple_input_active() && !is_menu();
+			if (!((simple_input && magik_load_simple_map(dev, &input[dev].mmap, sizeof(input[dev].mmap)))
+				|| (!simple_input && load_map(get_map_name(dev, 1), &input[dev].mmap, sizeof(input[dev].mmap)))))
 			{
+				if (simple_input) printf("MiSTer MagiK simple input: no managed map for %s, using fallback\n", input[dev].idstr);
 				if (!gcdb_map_for_controller(input[sub_dev].bustype, input[sub_dev].vid, input[sub_dev].pid, input[sub_dev].gcdb_version, pool[sub_dev].fd, input[dev].mmap))
 				{
 					memset(input[dev].mmap, 0, sizeof(input[dev].mmap));
 					memcpy(input[dev].mmap, def_mmap, sizeof(def_mmap));
 					//input[dev].has_mmap++;
 				}
-			} else {
+			} else if (!simple_input) {
 				gcdb_show_string_for_ctrl_map(input[sub_dev].bustype, input[sub_dev].vid, input[sub_dev].pid, input[sub_dev].gcdb_version, pool[sub_dev].fd, input[sub_dev].name, input[dev].mmap);
 			}
 			if (!input[dev].mmap[SYS_BTN_OSD_KTGL + 2]) input[dev].mmap[SYS_BTN_OSD_KTGL + 2] = input[dev].mmap[SYS_BTN_OSD_KTGL + 1];
@@ -3062,6 +3232,19 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 			memset(input[dev].map, 0, sizeof(input[dev].map));
 			input[dev].map[map_paddle_btn()] = 0x120;
 		}
+		else if (magik_simple_input_active() && !is_menu())
+		{
+			memset(input[dev].map, 0, sizeof(input[dev].map));
+			if (input[dev].has_mmap == 1)
+			{
+				map_joystick(input[dev].map, input[dev].mmap);
+			}
+			else
+			{
+				input[dev].has_map++;
+			}
+			input[dev].has_map++;
+		}
 		else if (!load_map(get_map_name(dev, 0), &input[dev].map, sizeof(input[dev].map)))
 		{
 			memset(input[dev].map, 0, sizeof(input[dev].map));
@@ -3084,7 +3267,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 
 	if (!input[dev].has_advanced_map)
 	{
-		input_advanced_load(dev);
+		if (!magik_simple_input_active() || is_menu()) input_advanced_load(dev);
 		input[dev].has_advanced_map = true;
 	}
 
@@ -3614,7 +3797,7 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 					if (osd_event == 2) joy_digital(input[dev].num, 0, 0, 0, BTN_OSD);
 				}
 
-				if (user_io_osd_is_visible() || video_fb_state())
+				if (user_io_osd_is_visible() || video_fb_state() || mister_magik_launcher_input_proxy_active())
 				{
 					if (ev->value <= 1)
 					{
@@ -3782,6 +3965,29 @@ static void input_cb(struct input_event *ev, struct input_absinfo *absinfo, int 
 			// keyboard
 			else
 			{
+				if (mister_magik_launcher_input_proxy_active() && ev->value <= 1)
+				{
+					int key = magik_input_proxy_keyboard_key(ev->code);
+					if (key)
+					{
+						MagikInputProxyEvent event = {};
+						MagikInputProxyUpdate update = magik_input_proxy_update(
+							&magik_proxy_state,
+							NUMDEV + dev,
+							ev->code,
+							0,
+							-1,
+							key,
+							ev->value != 0,
+							&event);
+						if (update == MagikInputProxyEmit)
+							uinp_send_key((uint16_t)event.key, event.press);
+						else if (update == MagikInputProxyOverflow || update == MagikInputProxyUnmatchedRelease)
+							magik_proxy_desync_count++;
+						return;
+					}
+				}
+
 				//  replace MENU key by RGUI to allow using Right Amiga on reduced keyboards
 				// (it also disables the use of Menu for OSD)
 				if (cfg.key_menu_as_rgui && ev->code == KEY_COMPOSE) ev->code = KEY_RIGHTMETA;
@@ -4050,6 +4256,17 @@ void send_map_cmd(int key)
 
 #define CMD_FIFO "/dev/MiSTer_cmd"
 #define LED_MONITOR "/sys/class/leds/hps_led0/brightness_hw_changed"
+
+int input_command_fifo_ready()
+{
+	return pool[NUMDEV + 1].fd >= 0;
+}
+
+unsigned long input_command_fifo_inode()
+{
+	struct stat st;
+	return input_command_fifo_ready() && !fstat(pool[NUMDEV + 1].fd, &st) ? (unsigned long)st.st_ino : 0;
+}
 
 // add sequential suffixes for non-merged devices
 void make_unique(uint16_t vid, uint16_t pid, int type)
@@ -5111,7 +5328,7 @@ static void setup_wheels()
 	}
 }
 
-int input_test(int getchar)
+static int input_test(int getchar, bool launcher_mode, int launcher_command_fd, bool initialize_only)
 {
 	PROFILE_FUNCTION();
 	static char cur_leds = 0;
@@ -5142,6 +5359,7 @@ int input_test(int getchar)
 
 		pool[NUMDEV+1].fd = open(CMD_FIFO, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		pool[NUMDEV+1].events = POLLIN;
+		mister_magik_reply_channel_init();
 
 		pool[NUMDEV + 2].fd = open(LED_MONITOR, O_RDONLY | O_CLOEXEC);
 		pool[NUMDEV + 2].events = POLLPRI;
@@ -5563,6 +5781,8 @@ int input_test(int getchar)
 		state++;
 	}
 
+	if (initialize_only) return 0;
+
 	if (cfg.bt_auto_disconnect)
 	{
 		if (!timeout) timeout = GetTimer(6000);
@@ -5594,7 +5814,8 @@ int input_test(int getchar)
 	if (state == 2)
 	{
 		int timeout = 0;
-		if (is_menu() && video_fb_state()) timeout = 25;
+		if (launcher_mode) timeout = 1000;
+		else if (is_menu() && video_fb_state()) timeout = 25;
 
 		while (1)
 		{
@@ -5614,8 +5835,19 @@ int input_test(int getchar)
 			}
 
 
+			struct pollfd command_poll = pool[NUMDEV + 1];
+			if (launcher_mode)
+			{
+				pool[NUMDEV + 1].fd = launcher_command_fd;
+				pool[NUMDEV + 1].events = launcher_command_fd >= 0 ? POLLIN : 0;
+				pool[NUMDEV + 1].revents = 0;
+			}
 			int return_value = poll(pool, NUMDEV + 3, timeout);
+			bool launcher_command_ready = launcher_mode &&
+				(pool[NUMDEV + 1].revents & POLLIN);
+			if (launcher_mode) pool[NUMDEV + 1] = command_poll;
 			if (!return_value) break;
+			if (launcher_command_ready) break;
 
 			if (return_value < 0)
 			{
@@ -5625,6 +5857,7 @@ int input_test(int getchar)
 
 			if ((pool[NUMDEV].revents & POLLIN) && check_devs())
 			{
+				magik_proxy_reset(mister_magik_launcher_input_proxy_active());
 				printf("Close all devices.\n");
 				for (int i = 0; i < NUMDEV; i++) if (pool[i].fd >= 0)
 				{
@@ -6224,7 +6457,7 @@ int input_test(int getchar)
 				}
 			}
 
-			if ((pool[NUMDEV + 1].fd >= 0) && (pool[NUMDEV + 1].revents & POLLIN))
+			if (!launcher_mode && (pool[NUMDEV + 1].fd >= 0) && (pool[NUMDEV + 1].revents & POLLIN))
 			{
 				static char cmd[1024];
 				int len = read(pool[NUMDEV + 1].fd, cmd, sizeof(cmd) - 1);
@@ -6235,6 +6468,11 @@ int input_test(int getchar)
 					printf("MiSTer_cmd: %s\n", cmd);
 					if (!strncmp(cmd, "fb_cmd", 6)) video_cmd(cmd);
 					else if (!strncmp(cmd, "video_mode ", 11)) video_mode_cmd(cmd + 11);
+					else if (!strcmp(cmd, "mister_magik_return_to_launcher"))
+					{
+						mister_magik_command_reply("ok HandoffStarted");
+						fpga_load_rbf("menu.rbf");
+					}
 					else if (!strncmp(cmd, "load_core ", 10))
 					{
 						if(isXmlName(cmd)) xml_load(cmd + 10);
@@ -6272,7 +6510,9 @@ int input_test(int getchar)
 				static char status[16];
 				if (read(pool[NUMDEV + 2].fd, status, sizeof(status) - 1) && status[0] != '0')
 				{
-					if (sysled_is_enabled || video_fb_state()) DISKLED_ON;
+					if (magik_input_proxy_allows_fpga_output(launcher_mode) &&
+					    (sysled_is_enabled || video_fb_state()))
+						DISKLED_ON;
 				}
 				lseek(pool[NUMDEV + 2].fd, 0, SEEK_SET);
 			}
@@ -6319,7 +6559,7 @@ void key_update_frames_held_cb(void)
 	}
 }
 
-int input_poll(int getchar)
+static int input_poll_mode(int getchar, bool launcher_mode, int launcher_command_fd)
 {
 	#ifdef PROFILING
 		PROFILE_FUNCTION();
@@ -6329,14 +6569,13 @@ int input_poll(int getchar)
  	if (!autofire_cfg_parsed) autofire_cfg_parsed = parse_autofire_cfg();
 	static uint32_t joy_mask_prev[NUMPLAYERS] = {};
 
-	add_frame_callback(key_update_frames_held_cb);
-
-
-	int ret = input_test(getchar);
+	int ret = input_test(getchar, launcher_mode, launcher_command_fd, false);
 	if (getchar) return ret;
 
 	uinp_check_key();
+	if (!magik_input_proxy_allows_fpga_output(launcher_mode)) return ret;
 
+	add_frame_callback(key_update_frames_held_cb);
 	static int prev_dx = 0;
 	static int prev_dy = 0;
 
@@ -6410,6 +6649,21 @@ int input_poll(int getchar)
 	}
 
 	return 0;
+}
+
+int input_poll(int getchar)
+{
+	return input_poll_mode(getchar, false, -1);
+}
+
+int input_poll_launcher(int command_fd)
+{
+	return input_poll_mode(0, true, command_fd);
+}
+
+void input_prepare_launcher_proxy()
+{
+	(void)input_test(0, true, -1, true);
 }
 
 int is_key_pressed(int key)

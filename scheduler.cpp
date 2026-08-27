@@ -9,6 +9,7 @@
 #include "osd.h"
 #include "profiling.h"
 #include "video.h"
+#include "support/mister_magik/launcher.h"
 
 static cothread_t co_scheduler = nullptr;
 static cothread_t co_poll = nullptr;
@@ -31,10 +32,26 @@ static void scheduler_co_poll(void)
 
 		{
 			SPIKE_SCOPE("co_poll", 1000);
-			user_io_poll();
-			frame_timer();
-			input_poll(0);
-			video_poll();
+			if (mister_magik_launcher_session_owned())
+			{
+				mister_magik_launcher_poll();
+				if (mister_magik_launcher_input_proxy_active())
+				{
+					input_poll_launcher(mister_magik_launcher_command_fd());
+				}
+				else if (mister_magik_launcher_idle_waits())
+				{
+					mister_magik_launcher_wait_for_activity();
+				}
+			}
+			else
+			{
+				user_io_poll();
+				frame_timer();
+				input_poll(0);
+				video_poll();
+				mister_magik_launcher_poll();
+			}
 		}
 
 		scheduler_yield();
@@ -47,8 +64,11 @@ static void scheduler_co_ui(void)
 	{
 		{
 			SPIKE_SCOPE("co_ui", 1000);
-			HandleUI();
-			OsdUpdate();
+			if (!mister_magik_launcher_session_owned())
+			{
+				HandleUI();
+				OsdUpdate();
+			}
 		}
 
 		scheduler_yield();

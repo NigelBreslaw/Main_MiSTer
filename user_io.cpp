@@ -42,6 +42,9 @@
 #include "frame_timer.h"
 #include "scaler.h"
 #include "support.h"
+#include "support/mister_magik/launcher.h"
+#include "support/mister_magik/launcher_command.h"
+#include "support/mister_magik/sdram_config.h"
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1358,6 +1361,48 @@ uint16_t sdram_sz(int sz)
 	return res;
 }
 
+uint16_t user_io_ensure_sdram_config()
+{
+	static int checked = 0;
+	static uint16_t checked_size = 0;
+	if (checked)
+	{
+		mister_magik_record_sdram_config(true, "cache", checked_size);
+		return checked_size;
+	}
+
+	uint16_t cached = sdram_sz(-1);
+	MagikSdramConfig config = magik_sdram_config(cached, 0);
+	if (config.valid)
+	{
+		checked = 1;
+		checked_size = config.size_code;
+		mister_magik_record_sdram_config(true, "cache", checked_size);
+		return checked_size;
+	}
+
+	spi_uio_cmd_cont(UIO_GET_OSDMASK);
+	sdram_cfg = spi_w(0);
+	DisableIO();
+
+	if (sdram_cfg & 0x8000)
+	{
+		printf("*** Got SDRAM module type: %d\n", sdram_cfg & 7);
+	}
+
+	config = magik_sdram_config(0, sdram_cfg);
+	if (config.valid)
+	{
+		sdram_sz(config.size_code);
+		checked = 1;
+		checked_size = config.size_code;
+		mister_magik_record_sdram_config(true, "menu_probe", checked_size);
+	}
+	else
+		mister_magik_record_sdram_config(false, "menu_probe", 0);
+	return checked_size;
+}
+
 uint16_t altcfg(int alt)
 {
 	int res = 0;
@@ -1408,6 +1453,8 @@ void user_io_init(const char *path, const char *xml)
 	static char mainpath[512];
 	core_name[0] = 0;
 	disable_osd = 0;
+	MagikStructuredLaunchPlan magik_plan;
+	bool has_magik_plan = magik_launcher_parse_plan_arg(xml, &magik_plan);
 
 	// Clean up old game ID when loading a new core
 	unlink("/tmp/GAMEID");
@@ -1419,7 +1466,7 @@ void user_io_init(const char *path, const char *xml)
 	// we need to set the directory to where the XML file (MRA) is
 	// not the RBF. The RBF will be in arcade, which the user shouldn't
 	// browse
-	strcpy(core_path, xml ? xml : path);
+	strcpy(core_path, has_magik_plan ? path : (xml ? xml : path));
 	strcpy(rbf_path, path);
 
 	memset(sd_image, 0, sizeof(sd_image));
@@ -1445,7 +1492,7 @@ void user_io_init(const char *path, const char *xml)
 
 	OsdSetSize(8);
 
-	if (xml)
+	if (xml && !has_magik_plan)
 	{
 		if (isXmlName(xml) == 1) is_arcade_type = 1;
 		arcade_pre_parse(xml);
@@ -1512,15 +1559,26 @@ void user_io_init(const char *path, const char *xml)
 
 	if (cfg.bootcore[0] != '\0')
 	{
-		bootcore_init(xml ? xml : path);
+		bootcore_init(has_magik_plan ? path : (xml ? xml : path));
+	}
+
+	bool magik_menu_launcher = is_menu() && mister_magik_launcher_configured();
+	if (magik_menu_launcher)
+	{
+		mister_magik_launcher_begin_boot_lockdown();
 	}
 
 	video_init();
+	if (magik_menu_launcher)
+	{
+		mister_magik_launcher_route_early_black();
+	}
 	if (strlen(cfg.font)) LoadFont(cfg.font);
 	load_volume();
 
 	user_io_send_buttons(1);
-	if (xml && isXmlName(xml) == 2) mgl_parse(xml);
+	if (has_magik_plan) mgl_seed_launch_plan(magik_plan.payload_path, magik_plan.mount_kind, magik_plan.mount_index, magik_plan.delay_secs);
+	else if (xml && isXmlName(xml) == 2) mgl_parse(xml);
 
 	switch (core_type)
 	{
@@ -1566,12 +1624,16 @@ void user_io_init(const char *path, const char *xml)
 			else if (is_menu())
 			{
 				user_io_status_set("[4]", (cfg.menu_pal) ? 1 : 0);
-				if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
+				if (magik_menu_launcher)
+				{
+					mister_magik_launcher_enter_after_menu_init();
+				}
+				else if (cfg.fb_terminal) video_menu_bg(user_io_status_get("[3:1]"));
 				else user_io_status_set("[3:1]", 0);
 			}
 			else
 			{
-				if (xml && isXmlName(xml) == 1)
+				if (xml && !has_magik_plan && isXmlName(xml) == 1)
 				{
 					arcade_send_rom(xml);
 					if (ss_base) process_ss(xml);
@@ -1706,7 +1768,7 @@ void user_io_init(const char *path, const char *xml)
 
 		// release reset
 		if (!is_minimig() && !is_st()) user_io_status_set("[0]", 0);
-		if (xml && isXmlName(xml) == 1) arcade_check_error();
+		if (xml && !has_magik_plan && isXmlName(xml) == 1) arcade_check_error();
 
 		char cfg_errs[512];
 		if (cfg.sanity_check && cfg_check_errors(cfg_errs, sizeof(cfg_errs)))
@@ -3041,18 +3103,18 @@ void user_io_send_buttons(char force)
 	if (user_io_user_button()) map |= BUTTON2;
 	if (kbd_reset || kbd_reset_ovr) map |= BUTTON2;
 
-	if (cfg.vga_scaler) map |= CONF_VGA_SCALER;
-	if (cfg.vga_sog) map |= CONF_VGA_SOG;
-	if (cfg.csync) map |= CONF_CSYNC;
-	if (cfg.vga_mode_int == 1) map |= CONF_YPBPR;
-	if (cfg.forced_scandoubler) map |= CONF_FORCED_SCANDOUBLER;
-	if (cfg.hdmi_audio_96k) map |= CONF_AUDIO_96K;
-	if (cfg.dvi_mode == 1) map |= CONF_DVI;
-	if (cfg.hdmi_limited & 1) map |= CONF_HDMI_LIMITED1;
-	if (cfg.hdmi_limited & 2) map |= CONF_HDMI_LIMITED2;
-	if (cfg.direct_video) map |= CONF_DIRECT_VIDEO;
-	if (cfg.direct_video == 2) map |= CONF_DIRECT_VIDEO2;
-	if (vga_fb) map |= CONF_VGA_FB;
+	UserIoFrameworkConfig framework = {};
+	framework.vga_scaler = cfg.vga_scaler;
+	framework.vga_sog = cfg.vga_sog;
+	framework.csync = cfg.csync;
+	framework.vga_mode_int = cfg.vga_mode_int;
+	framework.forced_scandoubler = cfg.forced_scandoubler;
+	framework.hdmi_audio_96k = cfg.hdmi_audio_96k;
+	framework.dvi_mode = cfg.dvi_mode;
+	framework.hdmi_limited = cfg.hdmi_limited;
+	framework.direct_video = cfg.direct_video;
+	framework.vga_fb = vga_fb;
+	map = user_io_apply_framework_config(map, framework);
 
 	if ((map != key_map) || force)
 	{
@@ -3750,33 +3812,7 @@ void user_io_poll()
 	{
 		if (is_menu())
 		{
-			static int got_cfg = 0;
-			if (!got_cfg)
-			{
-				spi_uio_cmd_cont(UIO_GET_OSDMASK);
-				sdram_cfg = spi_w(0);
-				DisableIO();
-
-				if (sdram_cfg & 0x8000)
-				{
-					got_cfg = 1;
-					printf("*** Got SDRAM module type: %d\n", sdram_cfg & 7);
-					switch (user_io_get_sdram_cfg() & 7)
-					{
-					case 7:
-						sdram_sz(3);
-						break;
-					case 3:
-						sdram_sz(2);
-						break;
-					case 1:
-						sdram_sz(1);
-						break;
-					default:
-						sdram_sz(0);
-					}
-				}
-			}
+			user_io_ensure_sdram_config();
 		}
 
 		res_timer = GetTimer(500);

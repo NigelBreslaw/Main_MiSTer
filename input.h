@@ -100,6 +100,8 @@ void sysled_enable(int en);
 
 void input_notify_mode();
 int input_poll(int getchar);
+int input_poll_launcher(int command_fd);
+void input_prepare_launcher_proxy();
 int is_key_pressed(int key);
 
 void start_map_setting(int cnt, int set = 0, advancedButtonMap *code_store = NULL);
@@ -131,6 +133,11 @@ void input_lightgun_save(int idx, int32_t *cal);
 void input_switch(int grab);
 int input_state();
 void input_uinp_destroy();
+unsigned long input_proxy_write_failures();
+unsigned long input_proxy_journal_overflows();
+unsigned long input_proxy_desyncs();
+int input_command_fifo_ready();
+unsigned long input_command_fifo_inode();
 
 extern char joy_bnames[NUMBUTTONS][32];
 extern int  joy_bcount;

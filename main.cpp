@@ -20,7 +20,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <stdlib.h>
-#include <unistd.h>
 #include <stdio.h>
 #include <sched.h>
 #include <inttypes.h>
@@ -34,11 +33,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "scheduler.h"
 #include "osd.h"
 #include "offload.h"
+#include "support/mister_magik/launcher.h"
 
 const char *version = "$VER:" VDATE;
 
 int main(int argc, char *argv[])
 {
+	mister_magik_launcher_record_main_entry((argc > 1) ? argv[1] : "");
+
 	// Always pin main worker process to core #1 as core #0 is the
 	// hardware interrupt handler in Linux.  This reduces idle latency
 	// in the main loop by about 6-7x.
@@ -70,6 +72,8 @@ int main(int argc, char *argv[])
 	}
 
 	FindStorage();
+	if (mister_magik_launcher_maybe_load_latch_menu((argc > 1) ? argv[1] : ""))
+		return 0;
 	user_io_init((argc > 1) ? argv[1] : "",(argc > 2) ? argv[2] : NULL);
 
 #ifdef USE_SCHEDULER
@@ -83,11 +87,23 @@ int main(int argc, char *argv[])
 			fpga_wait_to_reset();
 		}
 
-		user_io_poll();
-		frame_timer();
-		input_poll(0);
-		HandleUI();
-		OsdUpdate();
+		if (mister_magik_launcher_session_owned())
+		{
+			mister_magik_launcher_poll();
+			if (mister_magik_launcher_input_proxy_active())
+				input_poll_launcher(mister_magik_launcher_command_fd());
+			else if (mister_magik_launcher_idle_waits())
+				mister_magik_launcher_wait_for_activity();
+		}
+		else
+		{
+			user_io_poll();
+			frame_timer();
+			input_poll(0);
+			HandleUI();
+			OsdUpdate();
+			mister_magik_launcher_poll();
+		}
 	}
 #endif
 	return 0;

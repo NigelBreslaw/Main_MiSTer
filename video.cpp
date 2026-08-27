@@ -30,6 +30,7 @@
 
 #include "support.h"
 #include "support/arcade/mra_loader.h"
+#include "support/mister_magik/launcher.h"
 #include "lib/imlib2/Imlib2.h"
 #include "lib/md5/md5.h"
 
@@ -2417,7 +2418,10 @@ static void fb_init()
 			printf("Unable to mmap FB!\n");
 		}
 	}
-	spi_uio_cmd16(UIO_SET_FBUF, 0);
+	if (!mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		spi_uio_cmd16(UIO_SET_FBUF, 0);
+	}
 }
 
 // Structure to hold DAC configuration
@@ -2732,6 +2736,75 @@ void video_reinit()
 	user_io_send_buttons(1);
 	video_mode_adjust(1);
 	video_menu_bg(-1);
+}
+
+static bool video_apply_active_output(bool keep_direct_video_auto, bool restore_menu_background)
+{
+	read_edid(true);
+	hdmi_config_init();
+	hdmi_invalidate_mode_cache();
+	hdmi_config_set_hdr();
+	video_mode_load(keep_direct_video_auto);
+	video_set_mode(&v_def, 0);
+	user_io_send_buttons(1);
+	video_mode_adjust(true);
+	if (restore_menu_background) video_menu_bg(-1);
+	return true;
+}
+
+bool video_apply_runtime_output(const char *mode)
+{
+	if (!mode || !mode[0]) return false;
+	const bool auto_requested = !strcmp(mode, "auto");
+	if (auto_requested)
+	{
+		cfg.direct_video = 2;
+	}
+	else if (!strcmp(mode, "crt-240p60") || !strcmp(mode, "crt-288p50") ||
+	         !strcmp(mode, "crt-480p60") || !strcmp(mode, "crt-576p50"))
+	{
+		cfg.direct_video = 1;
+		cfg.menu_pal = strstr(mode, "288") || strstr(mode, "576");
+		cfg.forced_scandoubler = strstr(mode, "480") || strstr(mode, "576");
+	}
+	else
+	{
+		const char *value = 0;
+		if (!strcmp(mode, "hdmi") || !strcmp(mode, "custom")) value = cfg.video_conf;
+		else if (!strcmp(mode, "hdmi-1280x720p60")) value = "0";
+		else if (!strcmp(mode, "hdmi-1366x768p60")) value = "10";
+		else if (!strcmp(mode, "hdmi-1920x1080p60")) value = "8";
+		else if (!strcmp(mode, "hdmi-1920x1200p60")) value = "1920,1200,60";
+		else if (!strcmp(mode, "hdmi-2048x1536p60")) value = "13";
+		else if (!strcmp(mode, "hdmi-2560x1440p60")) value = "14";
+		else return false;
+		cfg.direct_video = 0;
+		if (value != cfg.video_conf)
+			snprintf(cfg.video_conf, sizeof(cfg.video_conf), "%s", value);
+	}
+
+	// Unlike video_reinit(), a settings transaction must not skip an unchanged
+	// EDID: the requested mode itself changed. Refresh the sink before resetting
+	// the transmitter, matching the reinitialization path that recovers a link
+	// after boot. Without this, the FPGA geometry changes while HDMI can remain
+	// unsignalled after leaving direct video.
+	// Preserve automatic sink detection only while applying auto itself. An
+	// explicit mode, including transaction rollback, must clear the static
+	// auto-routing latch before loading its saved geometry.
+	return video_apply_active_output(auto_requested, true);
+}
+
+bool video_reassert_runtime_output()
+{
+	// Direct-video routes do not use the HDMI transmitter mode that this
+	// recovery reasserts. The caller also guards the route so a future caller
+	// cannot accidentally bounce a working CRT output.
+	if (cfg.direct_video) return false;
+
+	// Keep the automatic-output latch established by video_init(). This repeats
+	// the same transmitter and mode sequence used by an attended same-mode
+	// display apply without exposing Menu's background before MagiK is ready.
+	return video_apply_active_output(true, false);
 }
 
 void tmds_power(int on)
@@ -3460,6 +3533,14 @@ static void fb_write_module_params()
 {
 	int width = fb_width;
 	int height = fb_height;
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_main_framebuffer_route_while_launcher_active", "fb_write_module_params");
+		}
+		return;
+	}
+
 	offload_add_work([=]
 	{
 		FILE *fp = fopen("/sys/module/MiSTer_fb/parameters/mode", "wt");
@@ -3471,9 +3552,35 @@ static void fb_write_module_params()
 	});
 }
 
+int video_magik_enter_bootstrap_black()
+{
+	DisableIO();
+	int res = spi_uio_cmd_cont(UIO_SET_FBUF);
+	spi_w(0);
+	DisableIO();
+
+	fb_enabled = 0;
+	fb_num = 0;
+	if (!res)
+	{
+		printf("mister_magik: bootstrap framebuffer disable was not acknowledged\n");
+		return 0;
+	}
+	printf("mister_magik: bootstrap framebuffer route disabled\n");
+	return 1;
+}
+
 void video_fb_enable(int enable, int n)
 {
 	PROFILE_FUNCTION();
+
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_main_framebuffer_route_while_launcher_active", enable ? "video_fb_enable enable" : "video_fb_enable disable");
+		}
+		return;
+	}
 
 	if (fb_base)
 	{
@@ -3888,6 +3995,14 @@ void video_menu_bg(int n, int idle)
 
 	static int cached_idle = 0;
 	bg_has_picture = 0;
+
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_menu_background_while_launcher_active", n < 0 ? "video_menu_bg refresh" : "video_menu_bg set");
+		}
+		return;
+	}
 
 	if (n < 0)
 	{
@@ -4490,4 +4605,3 @@ int video_get_rotated()
 {
   return current_video_info.rotated;
 }
-

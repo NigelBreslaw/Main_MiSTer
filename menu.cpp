@@ -68,6 +68,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "profiling.h"
 #include "str_util.h"
 #include "autofire.h"
+#include "support/mister_magik/launcher.h"
+#include "support/mister_magik/menu_path.h"
 
 /*menu states*/
 enum MENU
@@ -441,11 +443,19 @@ void SelectFile(const char* path, const char* pFileExt, int Options, unsigned ch
 
 	if (Options & SCANO_CORES)
 	{
-		strcpy(selPath, get_rbf_dir());
-		if (strlen(get_rbf_name()))
+		const char *path_override = magik_menu_browser_path_override(get_rbf_path());
+		if (path_override)
 		{
-			if(strlen(selPath)) strcat(selPath, "/");
-			strcat(selPath, get_rbf_name());
+			strcpy(selPath, path_override);
+		}
+		else
+		{
+			strcpy(selPath, get_rbf_dir());
+			if (strlen(get_rbf_name()))
+			{
+				if(strlen(selPath)) strcat(selPath, "/");
+				strcat(selPath, get_rbf_name());
+			}
 		}
 		ResolveExistingCorePath(selPath);
 		pFileExt = "RBFMRAMGL";
@@ -1151,6 +1161,7 @@ void HandleUI(void)
 	unsigned char m = 0, up, down, select, menu, back, right, left, plus, minus, recent;
 	char enable;
 	static int reboot_req = 0;
+	static bool generic_magik_return = false;
 	static uint32_t helptext_timer;
 	static int helptext_idx = 0;
 	static int helptext_idx_old = 0;
@@ -1618,6 +1629,7 @@ void HandleUI(void)
 			else if (saved_menustate)
 			{
 				menustate = saved_menustate;
+				if (menustate == MENU_GENERIC_MAIN1) menusub = mister_magik_launcher_configured() ? 1 : 0;
 			}
 			else if (is_st()) menustate = MENU_ST_MAIN1;
 			else if (is_archie()) menustate = MENU_ARCHIE_MAIN1;
@@ -1645,6 +1657,7 @@ void HandleUI(void)
 					{
 						parentstate = MENU_NONE1;
 						menustate = MENU_GENERIC_MAIN1;
+						menusub = mister_magik_launcher_configured() ? 1 : 0;
 					}
 				}
 			}
@@ -1907,6 +1920,7 @@ void HandleUI(void)
 	case MENU_GENERIC_MAIN2: {
 		hdmask = spi_uio_cmd16(UIO_GET_OSDMASK, 0);
 		user_io_read_confstr();
+		generic_magik_return = !page && mister_magik_launcher_configured();
 		uint32_t s_entry = 0;
 		int entry = 0;
 		while(1)
@@ -1924,6 +1938,13 @@ void HandleUI(void)
 			manual_submenu = -1;
 
 			int last_space = 0;
+
+			if (generic_magik_return)
+			{
+				MenuWrite(entry++, " Back to MagiK menu", menusub == selentry, 0);
+				selentry++;
+				menumask = (menumask << 1) | 1;
+			}
 
 			// add options as requested by core
 			int i = 2;
@@ -2201,7 +2222,11 @@ void HandleUI(void)
 				}
 			} while (p);
 
-			if (!entry) break;
+			if (entry == (generic_magik_return ? 1 : 0))
+			{
+				entry = 0;
+				break;
+			}
 
 			for (; entry < OsdGetSize() - 1; entry++) MenuWrite(entry, "", 0, 0);
 
@@ -2302,6 +2327,10 @@ void HandleUI(void)
 		{
 			menustate = MENU_NONE1;
 		}
+		else if (generic_magik_return && menusub == 0 && select)
+		{
+			fpga_load_rbf("menu.rbf");
+		}
 		else if(back || (left && page) || (menusub == menusub_last && select))
 		{
 			if(!page) menustate = MENU_NONE1;
@@ -2338,7 +2367,7 @@ void HandleUI(void)
 			{
 				static char ext[256];
 				int h = 0, d = 0, inpage = !page;
-				uint32_t entry = 0;
+				uint32_t entry = generic_magik_return ? 1 : 0;
 				int i = 2;
 
 				p = 0;

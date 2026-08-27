@@ -29,7 +29,7 @@ allowed_path() {
 mapfile -t paths < <(
   {
     git diff --name-only "$BASE_REF..HEAD"
-    git diff --name-only
+    git diff --ignore-cr-at-eol --name-only
     git diff --name-only --cached
   } | LC_ALL=C sort -u
 )

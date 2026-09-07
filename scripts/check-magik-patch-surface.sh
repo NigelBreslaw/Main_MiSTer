@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-UPSTREAM_COMMIT="dfb4791bea126afea66025be806651a995f9cfd6"
+UPSTREAM_COMMIT="f8dc68e3dcf4694f5593e6552aea56cd852982af"
 BASE_REF="${MAGIK_BASELINE_REF:-$UPSTREAM_COMMIT}"
 
 if ! git rev-parse --verify "$BASE_REF^{commit}" >/dev/null 2>&1; then

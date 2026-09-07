@@ -8,18 +8,24 @@ being mixed into the product UI codebase.
 ## Upstream Baseline
 
 - Upstream: `MiSTer-devel/Main_MiSTer`
-- Baseline commit: `dfb4791bea126afea66025be806651a995f9cfd6`
-- Baseline subject: `Release 20260823.`
+- Baseline commit: `f8dc68e3dcf4694f5593e6552aea56cd852982af`
+- Baseline subject: `Release 20260907.`
 - Baseline policy: use upstream release-marker commits named `Release YYYYMMDD.`
 - Device binary name: `/media/fat/MiSTer_MagiK`
 
 This is not an official MiSTer-devel build. Published binaries must be labelled
 as MiSTer MagiK builds.
 
-The four commits currently following the release marker on upstream `master`
-are Minimig CD/quick-start follow-ups and are intentionally not part of this
-baseline. They may be evaluated separately after this release-based rebuild is
-qualified.
+This baseline includes all nine commits since `Release 20260823.`: CD32/CDTV
+raw CUE/BIN support, Amiga quick-start ROM lookup through `HomeDir()`, MacPlus
+CD-ROM support, and Minimig CPU selector, preset, and configuration repairs,
+plus the CD-fix merge and release marker. The release is merged into the
+existing MagiK patch stack without rewriting published history.
+
+CD32 and A1200 presets now select the approximately 14 MHz 68020 mode. Validate
+them with the matching Minimig `20260907` core or a verified later descendant;
+older cores can apply the wrong throttle. Existing device results in
+`MAGIK_PATCHSET.md` are historical, not qualification of this baseline.
 
 ## Fork Policy
 

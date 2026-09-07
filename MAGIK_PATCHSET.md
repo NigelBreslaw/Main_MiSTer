@@ -7,8 +7,8 @@ reapply only the features and tests listed here.
 ## Baseline
 
 - Upstream project: `MiSTer-devel/Main_MiSTer`
-- Baseline commit: `dfb4791bea126afea66025be806651a995f9cfd6`
-- Baseline release: `Release 20260823.`
+- Baseline commit: `f8dc68e3dcf4694f5593e6552aea56cd852982af`
+- Baseline release: `Release 20260907.`
 - Public fork/app: `/media/fat/MiSTer_MagiK` and `/media/fat/mister-magik/`
 - Development fork/app: `/media/fat/MiSTer_MagiKDev` and
   `/media/fat/mister-magik-dev/`
@@ -22,12 +22,23 @@ the historical development commits. Upstream changes in `input.cpp`,
 `user_io.cpp`, and `video.cpp` were retained while the MagiK adapters were
 reapplied at their narrow integration seams.
 
-The release includes upstream HDMI/EDID and HDMI power-state repairs, expanded
+The 20260823 release included upstream HDMI/EDID and HDMI power-state repairs, expanded
 generic-menu state handling, and the July/August core and storage work. MagiK
 uses upstream's `tmds_power()` plus `hdmi_power`/`hdmi_need_init` model and does
-not carry the reverted legacy HPD state machine. The four later upstream
-Minimig follow-ups through `0a8fb44ccec6d69c8b7f158abd5fe8065ab2bf4f`
-remain outside this release baseline.
+not carry the reverted legacy HPD state machine.
+
+The 20260907 update merges all nine intervening upstream commits while
+preserving the existing MagiK patch stack and published history. It includes
+CD32/CDTV raw CUE/BIN data/audio support, quick-start ROM lookup through
+`HomeDir()`, MacPlus CD-ROM support with separate floppy/Toolbox slot gates,
+and Minimig CPU selector, default preset, and reserved-config-value repairs.
+Only `menu.cpp` overlaps the MagiK runtime patch surface, in separate sections.
+
+CD32 and A1200 presets now select the approximately 14 MHz 68020 mode. Device
+validation requires the matching Minimig `20260907` core or a verified later
+descendant containing the throttle correction and CPU flag wiring. Do not
+implicitly replace installed stock cores. All previously recorded device
+results below remain historical; they do not qualify the 20260907 update.
 
 ## Intended Features
 

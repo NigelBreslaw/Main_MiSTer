@@ -1945,6 +1945,11 @@ static bool run_launcher_readiness_preflight(const char *path)
 	}
 	if (!readiness_pid)
 	{
+		if (latch_reuse_qualification_armed())
+		{
+			setenv("MISTER_LATCH_V5_QUALIFICATION", "1", 1);
+			setenv("MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS", "8", 1);
+		}
 		int fd = open(
 		    "/tmp/mister-magik-slint.log",
 		    O_WRONLY | O_CREAT | O_APPEND,

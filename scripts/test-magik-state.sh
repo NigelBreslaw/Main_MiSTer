@@ -199,21 +199,27 @@ grep -q 'complete_handoff_to_game(cmd.path, true)' "$ROOT/support/mister_magik/l
 }
 
 awk '
-  /static bool write_launcher_script\(/ { in_script=1; sourced=0; token=0; fifo=0; settings=0; display=0; confirm=0 }
+  /static bool write_launcher_script\(/ { in_script=1; sourced=0; token=0; fifo=0; settings=0; display=0; confirm=0; qualification=0 }
   in_script && /"  \. / { sourced=1 }
   in_script && /MISTER_MAGIK_STARTUP_TOKEN/ { token=sourced }
   in_script && /MISTER_MAGIK_READY_FIFO/ { fifo=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_SETTINGS_V1/ { settings=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_DISPLAY_V1/ { display=sourced }
   in_script && /MISTER_MAGIK_DISPLAY_CONFIRM_UI/ { confirm=sourced }
+  in_script && /MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS=8/ { qualification=sourced }
   in_script && /fclose\(f\)/ {
-    if (!token || !fifo || !settings || !display || !confirm) exit 1
+    if (!token || !fifo || !settings || !display || !confirm || !qualification) exit 1
     checked=1
     in_script=0
   }
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
   echo "ERROR: launcher.env must not override Main-owned readiness or runtime display contracts" >&2
+  exit 1
+}
+
+grep -q 'latch_reuse_qualification_armed' "$ROOT/support/mister_magik/launcher.cpp" || {
+  echo "ERROR: Dev latch qualification must require the fixed marker" >&2
   exit 1
 }
 

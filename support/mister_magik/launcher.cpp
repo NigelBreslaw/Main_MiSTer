@@ -51,6 +51,7 @@ static const char s_local_dev_main_path[] = "/media/fat/MiSTer_MagiKDev";
 static const char s_boot_id_path[] = "/proc/sys/kernel/random/boot_id";
 static const char s_cmd_fifo_path[] = "/dev/MiSTer_cmd";
 static const char s_ready_fifo_path[] = "/tmp/mister-magik/launcher-ready-v2";
+static const char s_latch_qualification_token[] = "stock-6.18-latch-reuse-v1\n";
 static const unsigned long s_ready_timeout_ms = 8000;
 static const char *resolved_runtime_output()
 {
@@ -63,6 +64,23 @@ static const char *layout_path(const char *relative)
 	char *out = slots[next++ % 8];
 	magik_app_path(out, PATH_MAX, relative);
 	return out;
+}
+
+static bool latch_reuse_qualification_armed()
+{
+	if (!magik_dev_layout()) return false;
+	const char *path = layout_path("latch-reuse-qualification");
+	struct stat st;
+	if (lstat(path, &st) || !S_ISREG(st.st_mode) || st.st_size != (off_t)strlen(s_latch_qualification_token))
+		return false;
+	FILE *f = fopen(path, "r");
+	if (!f) return false;
+	char token[sizeof(s_latch_qualification_token)] = {};
+	const size_t size = fread(token, 1, sizeof(token) - 1, f);
+	const bool clean_eof = !ferror(f) && fgetc(f) == EOF;
+	fclose(f);
+	return clean_eof && size == sizeof(s_latch_qualification_token) - 1 &&
+	       !memcmp(token, s_latch_qualification_token, sizeof(s_latch_qualification_token) - 1);
 }
 
 static const int s_maintenance_poll_ms = 1000;
@@ -1956,6 +1974,7 @@ static bool write_launcher_script(const char *path)
 	FILE *f = fopen(s_script_path, "w");
 	if (!f) return false;
 	bool return_spawn = magik_launcher_consume_return_spawn(get_rbf_name(), get_rbf_path());
+	const bool latch_qualification = latch_reuse_qualification_armed();
 	fprintf(f,
 	        "#!/bin/bash\n"
 	        "export LC_ALL=en_US.UTF-8\n"
@@ -1976,6 +1995,7 @@ static bool write_launcher_script(const char *path)
 	        "export MISTER_MAGIK_RUNTIME_SETTINGS_V1='schema=1&output=%s'\n"
 	        "export MISTER_MAGIK_RUNTIME_DISPLAY_V1='schema=1&mode=%s'\n"
 	        "export MISTER_MAGIK_DISPLAY_CONFIRM_UI=%d\n"
+	        "%s"
 	        "if [ -e /dev/mister-magik-scanout-slots ]; then\n"
 	        "  echo 'scanout-slots-supervisor=device-ready' >>/tmp/mister-magik-slint.log\n"
 	        "else\n"
@@ -1994,10 +2014,13 @@ static bool write_launcher_script(const char *path)
 	        s_ready.owner_epoch,
 	        resolved_runtime_output(),
 	        configured_display_mode(),
-	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0);
+	        s_display_transaction.pending && s_display_transaction.confirm_ui ? 1 : 0,
+	        latch_qualification
+	            ? "export MISTER_LATCH_V5_QUALIFICATION=1\nexport MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS=8\n"
+	            : "");
 	fclose(f);
 	chmod(s_script_path, 0755);
-	eventf("launcher_script_written", "script=%s path=%s return_spawn=%d", s_script_path, path ? path : "", return_spawn ? 1 : 0);
+	eventf("launcher_script_written", "script=%s path=%s return_spawn=%d latch_qualification=%d", s_script_path, path ? path : "", return_spawn ? 1 : 0, latch_qualification ? 1 : 0);
 	return true;
 }
 
@@ -2340,6 +2363,7 @@ void mister_magik_status_write(void)
 	fprintf(f, ",\"writer_vt_graphics\":%s", s_writer_silence.ready_for_module() ? "true" : "false");
 	fprintf(f, ",\"module_preflight_started\":%s", s_module_preflight_started ? "true" : "false");
 	fprintf(f, ",\"module_preflight_passed\":%s", s_module_preflight_passed ? "true" : "false");
+	fprintf(f, ",\"latch_reuse_qualification_armed\":%s", latch_reuse_qualification_armed() ? "true" : "false");
 	fprintf(f, ",\"blocked_spi_writes\":%llu", (unsigned long long)fpga_io_blocked_spi_writes());
 	fprintf(f, ",\"blocked_gpo_writes\":%llu", (unsigned long long)fpga_io_blocked_gpo_writes());
 	fprintf(f, ",\"last_blocked_fpga_site\":");

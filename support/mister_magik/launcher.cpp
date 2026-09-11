@@ -10,6 +10,7 @@
 #include "launcher_wait.h"
 #include "layout.h"
 #include "menu_path.h"
+#include "writer_silence.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -101,6 +102,9 @@ static char s_bootstrap_source[64] = "none";
 static unsigned long s_bootstrap_phase_ms = 0;
 static unsigned long s_bootstrap_black_count = 0;
 static MagikBootstrapSequence s_bootstrap_sequence;
+static MagikWriterSilence s_writer_silence;
+static bool s_module_preflight_started = false;
+static bool s_module_preflight_passed = false;
 
 struct MagikReadyTransaction
 {
@@ -770,6 +774,7 @@ static void ensure_command_fifo(void)
 }
 
 static void reset_launcher_tty(void);
+static void release_writer_silence(void);
 enum class MagikLauncherSpawnResult
 {
 	Spawned,
@@ -824,6 +829,7 @@ static void restore_stock_menu_after_failed_spawn(void)
 	}
 
 	restore_fpga_owner_to_main("failed-spawn");
+	release_writer_silence();
 	s_spawn_pending = false;
 	transition(MagikLauncherEvent::ResetToUnconfigured);
 	if (!video_magik_enter_bootstrap_black())
@@ -838,6 +844,37 @@ static void restore_stock_menu_after_failed_spawn(void)
 	OsdEnable(DISABLE_KEYBOARD);
 	set_bootstrap_phase("failed-stock-osd", "failed-spawn");
 	eventf("launcher_spawn_restored_stock_menu", "child=none");
+}
+
+static bool acquire_writer_silence(void)
+{
+	if (!s_writer_silence.close_admission()) return s_writer_silence.ready_for_module();
+	/* Main's framebuffer parameter operations execute synchronously on this
+	 * control thread. Closing admission therefore drains every operation that
+	 * was admitted before this point; later call sites observe the same gate.
+	 */
+	if (!s_writer_silence.mark_drained()) return false;
+	int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+	bool graphics = tty_fd >= 0 && ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) == 0;
+	if (tty_fd >= 0) close(tty_fd);
+	if (!s_writer_silence.enter_graphics(graphics))
+	{
+		eventf("launcher_writer_silence_failed", "stage=kd-graphics errno=%d", errno);
+		s_writer_silence.release();
+		return false;
+	}
+	eventf("launcher_writer_silence_ready", "admission=closed drained=1 vt=graphics");
+	return true;
+}
+
+static void release_writer_silence(void)
+{
+	if (!s_writer_silence.suppress_writes()) return;
+	reset_launcher_tty();
+	s_writer_silence.release();
+	s_module_preflight_started = false;
+	s_module_preflight_passed = false;
+	eventf("launcher_writer_silence_released", "admission=open vt=text");
 }
 
 static bool enter_bootstrap_black(const char *source)
@@ -1789,6 +1826,9 @@ static void reset_launcher_tty(void)
 		if (write(tty_fd, reset, sizeof(reset) - 1) < 0) {}
 		close(tty_fd);
 	}
+	s_writer_silence.release();
+	s_module_preflight_started = false;
+	s_module_preflight_passed = false;
 }
 
 static bool wait_for_preflight_child(pid_t pid, const char *stage)
@@ -1816,6 +1856,13 @@ static bool wait_for_preflight_child(pid_t pid, const char *stage)
 
 static bool run_launcher_readiness_preflight(const char *path)
 {
+	if (!s_writer_silence.ready_for_module())
+	{
+		eventf("launcher_preflight_failed", "stage=writer-silence");
+		return false;
+	}
+	s_module_preflight_started = true;
+	s_module_preflight_passed = false;
 	event_jsonl("launcher_preflight_begin", path);
 	int log_fd = open(
 	    "/tmp/mister-magik-slint.log",
@@ -1900,6 +1947,7 @@ static bool run_launcher_readiness_preflight(const char *path)
 	    "launcher_preflight_passed",
 	    "protocol=5 capabilities=0x03ff identity=deployment-verified");
 	event_jsonl("launcher_preflight_end", "result=passed");
+	s_module_preflight_passed = true;
 	return true;
 }
 
@@ -1978,6 +2026,13 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	{
 		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "missing path=%s", magik_launcher_relative_path());
 		eventf("launcher_missing", "path=%s", magik_launcher_relative_path());
+		restore_stock_menu_after_failed_spawn();
+		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
+		return MagikLauncherSpawnResult::Failed;
+	}
+	if (!acquire_writer_silence())
+	{
+		set_status_string(s_last_spawn_error, sizeof(s_last_spawn_error), "writer_silence_failed");
 		restore_stock_menu_after_failed_spawn();
 		finish_pending_launcher_reply(MagikLauncherSpawnResult::Failed);
 		return MagikLauncherSpawnResult::Failed;
@@ -2179,7 +2234,8 @@ int mister_magik_launcher_command_fd(void)
 bool mister_magik_launcher_main_framebuffer_suppressed(void)
 {
 	if (s_video_diagnostic_active) return false;
-	return s_state == MagikLauncherState::BootingMain ||
+	return s_writer_silence.suppress_writes() ||
+	       s_state == MagikLauncherState::BootingMain ||
 	       magik_launcher_owns_session(s_state);
 }
 
@@ -2279,6 +2335,11 @@ void mister_magik_status_write(void)
 	fprintf(f, ",\"fpga_owner\":");
 	json_escape(f, fpga_io_owner_name());
 	fprintf(f, ",\"fpga_owner_epoch\":%llu", (unsigned long long)fpga_io_owner_epoch());
+	fprintf(f, ",\"writer_admission_closed\":%s", s_writer_silence.suppress_writes() ? "true" : "false");
+	fprintf(f, ",\"writer_drained\":%s", s_writer_silence.stage() == MagikWriterSilenceStage::Drained || s_writer_silence.stage() == MagikWriterSilenceStage::Graphics ? "true" : "false");
+	fprintf(f, ",\"writer_vt_graphics\":%s", s_writer_silence.ready_for_module() ? "true" : "false");
+	fprintf(f, ",\"module_preflight_started\":%s", s_module_preflight_started ? "true" : "false");
+	fprintf(f, ",\"module_preflight_passed\":%s", s_module_preflight_passed ? "true" : "false");
 	fprintf(f, ",\"blocked_spi_writes\":%llu", (unsigned long long)fpga_io_blocked_spi_writes());
 	fprintf(f, ",\"blocked_gpo_writes\":%llu", (unsigned long long)fpga_io_blocked_gpo_writes());
 	fprintf(f, ",\"last_blocked_fpga_site\":");

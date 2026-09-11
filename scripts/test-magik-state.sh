@@ -58,6 +58,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-bootstrap-sequence"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/writer_silence.cpp" \
+  "$ROOT/tests/writer_silence_test.cpp" \
+  -o "$OUT-writer-silence"
+"$OUT-writer-silence"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_return.cpp" \
   "$ROOT/tests/launcher_return_test.cpp" \
   -o "$OUT-return"

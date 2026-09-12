@@ -2307,8 +2307,20 @@ void mister_magik_launcher_begin_boot_lockdown(void)
 void mister_magik_status_write(void)
 {
 	ensure_status_dir();
-	FILE *f = fopen(s_status_path, "w");
-	if (!f) return;
+	char temporary[PATH_MAX];
+	snprintf(temporary, sizeof(temporary), "%s.%d.part", s_status_path, getpid());
+	int status_fd = open(
+	    temporary,
+	    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW,
+	    0600);
+	if (status_fd < 0) return;
+	FILE *f = fdopen(status_fd, "w");
+	if (!f)
+	{
+		close(status_fd);
+		unlink(temporary);
+		return;
+	}
 	char active_vt[64];
 	char fb_mode[128];
 	read_trimmed("/sys/class/tty/tty0/active", active_vt, sizeof(active_vt));
@@ -2407,7 +2419,19 @@ void mister_magik_status_write(void)
 	fprintf(f, ",\"last_video_detail\":");
 	json_escape(f, s_last_video_detail);
 	fprintf(f, "}\n");
-	fclose(f);
+	bool saved = fflush(f) == 0 && fsync(fileno(f)) == 0;
+	if (fclose(f) != 0) saved = false;
+	if (!saved || rename(temporary, s_status_path) != 0)
+	{
+		unlink(temporary);
+		return;
+	}
+	int directory_fd = open(s_status_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (directory_fd >= 0)
+	{
+		fsync(directory_fd);
+		close(directory_fd);
+	}
 }
 
 void mister_magik_launcher_route_early_black(void)

@@ -887,6 +887,74 @@ static void restore_stock_menu_after_failed_spawn(void)
 	eventf("launcher_spawn_restored_stock_menu", "child=none");
 }
 
+static bool activate_and_verify_launcher_vt(void)
+{
+	int console_fd = open("/dev/tty0", O_RDONLY | O_NOCTTY | O_CLOEXEC);
+	if (console_fd < 0)
+	{
+		eventf("launcher_writer_silence_failed", "stage=vt-open errno=%d", errno);
+		return false;
+	}
+
+	bool active = ioctl(console_fd, VT_ACTIVATE, s_vt) == 0;
+	if (!active)
+		eventf("launcher_writer_silence_failed", "stage=vt-activate errno=%d", errno);
+	if (active && ioctl(console_fd, VT_WAITACTIVE, s_vt) != 0)
+	{
+		active = false;
+		eventf("launcher_writer_silence_failed", "stage=vt-wait-active errno=%d", errno);
+	}
+
+	struct vt_stat state = {};
+	if (active && ioctl(console_fd, VT_GETSTATE, &state) != 0)
+	{
+		active = false;
+		eventf("launcher_writer_silence_failed", "stage=vt-get-state errno=%d", errno);
+	}
+	else if (active && state.v_active != s_vt)
+	{
+		active = false;
+		eventf(
+		    "launcher_writer_silence_failed",
+		    "stage=vt-active-mismatch expected=%d observed=%u",
+		    s_vt,
+		    state.v_active);
+	}
+	close(console_fd);
+	return active;
+}
+
+static bool set_and_verify_launcher_graphics(void)
+{
+	int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+	if (tty_fd < 0)
+	{
+		eventf("launcher_writer_silence_failed", "stage=tty-open errno=%d", errno);
+		return false;
+	}
+
+	bool graphics = ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) == 0;
+	if (!graphics)
+		eventf("launcher_writer_silence_failed", "stage=kd-graphics errno=%d", errno);
+	int mode = KD_TEXT;
+	if (graphics && ioctl(tty_fd, KDGETMODE, &mode) != 0)
+	{
+		graphics = false;
+		eventf("launcher_writer_silence_failed", "stage=kd-get-mode errno=%d", errno);
+	}
+	else if (graphics && mode != KD_GRAPHICS)
+	{
+		graphics = false;
+		eventf(
+		    "launcher_writer_silence_failed",
+		    "stage=kd-mode-mismatch expected=%d observed=%d",
+		    KD_GRAPHICS,
+		    mode);
+	}
+	close(tty_fd);
+	return graphics;
+}
+
 static bool acquire_writer_silence(void)
 {
 	if (!s_writer_silence.close_admission()) return s_writer_silence.ready_for_module();
@@ -895,16 +963,17 @@ static bool acquire_writer_silence(void)
 	 * was admitted before this point; later call sites observe the same gate.
 	 */
 	if (!s_writer_silence.mark_drained()) return false;
-	int tty_fd = open(s_tty_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
-	bool graphics = tty_fd >= 0 && ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) == 0;
-	if (tty_fd >= 0) close(tty_fd);
-	if (!s_writer_silence.enter_graphics(graphics))
+	if (!activate_and_verify_launcher_vt() ||
+	    !set_and_verify_launcher_graphics() ||
+	    !s_writer_silence.enter_graphics(true))
 	{
-		eventf("launcher_writer_silence_failed", "stage=kd-graphics errno=%d", errno);
-		s_writer_silence.release();
+		reset_launcher_tty();
 		return false;
 	}
-	eventf("launcher_writer_silence_ready", "admission=closed drained=1 vt=graphics");
+	eventf(
+	    "launcher_writer_silence_ready",
+	    "admission=closed drained=1 active_vt=%d vt=graphics",
+	    s_vt);
 	return true;
 }
 
@@ -912,9 +981,6 @@ static void release_writer_silence(void)
 {
 	if (!s_writer_silence.suppress_writes()) return;
 	reset_launcher_tty();
-	s_writer_silence.release();
-	s_module_preflight_started = false;
-	s_module_preflight_passed = false;
 	eventf("launcher_writer_silence_released", "admission=open vt=text");
 }
 
@@ -1968,6 +2034,8 @@ static bool run_launcher_readiness_preflight(const char *path)
 	}
 	if (!readiness_pid)
 	{
+		unsetenv("MISTER_LATCH_V5_QUALIFICATION");
+		unsetenv("MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS");
 		if (latch_reuse_qualification_armed())
 		{
 			setenv("MISTER_LATCH_V5_QUALIFICATION", "1", 1);
@@ -2014,6 +2082,7 @@ static bool write_launcher_script(const char *path)
 	        "if [ -f \"%s\" ]; then\n"
 	        "  . \"%s\"\n"
 	        "fi\n"
+	        "unset MISTER_LATCH_V5_QUALIFICATION MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS\n"
 	        "export MISTER_MAGIK_STARTUP_TOKEN='%s'\n"
 	        "export MISTER_MAGIK_READY_FIFO='%s'\n"
 	        "export MISTER_MAGIK_READY_WIRE_VERSION=3\n"
@@ -2116,7 +2185,6 @@ static MagikLauncherSpawnResult spawn_launcher(void)
 	user_io_osd_key_enable(0);
 	clear_launcher_tty();
 	OsdDisable();
-	video_chvt(s_vt);
 	input_switch(0);
 	bool ownership_transferred = transfer_fpga_owner_to_launcher("spawn-launcher");
 	if (!s_bootstrap_sequence.ownership_transferred(ownership_transferred))

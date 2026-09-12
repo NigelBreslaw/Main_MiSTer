@@ -63,6 +63,8 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   -o "$OUT-writer-silence"
 "$OUT-writer-silence"
 
+python3 "$ROOT/tests/test_launcher_contract.py"
+
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_return.cpp" \
   "$ROOT/tests/launcher_return_test.cpp" \
@@ -199,16 +201,17 @@ grep -q 'complete_handoff_to_game(cmd.path, true)' "$ROOT/support/mister_magik/l
 }
 
 awk '
-  /static bool write_launcher_script\(/ { in_script=1; sourced=0; token=0; fifo=0; settings=0; display=0; confirm=0; qualification=0 }
+  /static bool write_launcher_script\(/ { in_script=1; sourced=0; disarmed=0; token=0; fifo=0; settings=0; display=0; confirm=0; qualification=0 }
   in_script && /"  \. / { sourced=1 }
+  in_script && /unset MISTER_LATCH_V5_QUALIFICATION MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS/ { disarmed=sourced }
   in_script && /MISTER_MAGIK_STARTUP_TOKEN/ { token=sourced }
   in_script && /MISTER_MAGIK_READY_FIFO/ { fifo=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_SETTINGS_V1/ { settings=sourced }
   in_script && /MISTER_MAGIK_RUNTIME_DISPLAY_V1/ { display=sourced }
   in_script && /MISTER_MAGIK_DISPLAY_CONFIRM_UI/ { confirm=sourced }
-  in_script && /MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS=8/ { qualification=sourced }
+  in_script && /MISTER_MAGIK_DEV_LATCH_REUSE_QUARANTINE_VBLANKS=8/ { qualification=disarmed }
   in_script && /fclose\(f\)/ {
-    if (!token || !fifo || !settings || !display || !confirm || !qualification) exit 1
+    if (!disarmed || !token || !fifo || !settings || !display || !confirm || !qualification) exit 1
     checked=1
     in_script=0
   }

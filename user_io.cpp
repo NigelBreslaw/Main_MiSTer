@@ -282,6 +282,11 @@ char is_neogeo_cd() {
     return is_neogeo() && neocd_is_en();
 }
 
+char is_next()
+{
+	return !strcasecmp(orig_name, "NeXT");
+}
+
 static int is_minimig_type = 0;
 char is_minimig()
 {
@@ -1463,6 +1468,9 @@ void user_io_init(const char *path, const char *xml)
 	// path below restarts them if the card is enabled.
 	a2065_stop();
 
+	// Same for the NeXT ethernet bridge.
+	next_enet_stop();
+
 	// we need to set the directory to where the XML file (MRA) is
 	// not the RBF. The RBF will be in arcade, which the user shouldn't
 	// browse
@@ -1633,6 +1641,12 @@ void user_io_init(const char *path, const char *xml)
 			}
 			else
 			{
+				// The ethernet bridge is an addition to the NeXT core, not
+				// a replacement for its start-up: arming it must not claim
+				// a branch of the chain below, or the core skips the boot
+				// ROM load at its end and comes up with no ROM at all.
+				if (is_next()) next_enet_start();
+
 				if (xml && !has_magik_plan && isXmlName(xml) == 1)
 				{
 					arcade_send_rom(xml);
@@ -3202,6 +3216,7 @@ static void mouse_reply(char code)
 
 static uint8_t use_ps2ctl = 0;
 static unsigned long rtc_timer = 0;
+static unsigned long next_rtc_timer = 0;
 
 void user_io_rtc_reset()
 {
@@ -3271,6 +3286,19 @@ void user_io_poll()
 
 		minimig_share_poll();
 		a2065_poll();
+	}
+
+	next_enet_poll();
+
+	// The NeXT keeps a battery backed clock that the guest reads at
+	// boot; the one-shot update at core load is not enough if the core
+	// sits at the ROM monitor for a while, so refresh it every minute
+	// like the other cores that own a real time clock.  The core stops
+	// applying these once the guest sets its own time.
+	if (is_next() && (!next_rtc_timer || CheckTimer(next_rtc_timer)))
+	{
+		next_rtc_timer = GetTimer(60000);
+		send_rtc(1);
 	}
 
 	if (core_type == CORE_TYPE_8BIT && !is_menu())

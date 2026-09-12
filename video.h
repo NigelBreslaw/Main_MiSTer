@@ -35,7 +35,7 @@ struct VideoInfo
 extern VideoInfo current_video_info;
 
 void  video_init();
-void  video_reinit();
+void  video_reinit(const char *reason = "unspecified");
 bool  video_apply_runtime_output(const char *mode);
 bool  video_reassert_runtime_output();
 void  video_poll();

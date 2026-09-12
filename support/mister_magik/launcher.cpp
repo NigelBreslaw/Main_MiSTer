@@ -107,8 +107,11 @@ static bool s_video_diagnostic_active = false;
 static unsigned long s_invariant_count = 0;
 static unsigned long s_crash_count = 0;
 static unsigned long s_restart_count = 0;
+static unsigned long s_video_event_count = 0;
 static char s_last_invariant_kind[96] = "";
 static char s_last_invariant_detail[256] = "";
+static char s_last_video_event[96] = "";
+static char s_last_video_detail[384] = "";
 static char s_last_crash_reason[256] = "";
 static char s_last_crash_report[256] = "";
 static char s_last_crash_report_id[128] = "";
@@ -691,6 +694,26 @@ static void eventf(const char *event, const char *fmt, ...)
 	mister_magik_status_write();
 }
 
+void mister_magik_record_video_event(const char *event, const char *detail)
+{
+	s_video_event_count++;
+	snprintf(s_last_video_event, sizeof(s_last_video_event), "%s", event ? event : "unknown");
+	snprintf(s_last_video_detail, sizeof(s_last_video_detail), "%s", detail ? detail : "");
+	char context[512];
+	snprintf(
+	    context,
+	    sizeof(context),
+	    "state=%s launcher_pid=%d main_generation=%lu owner=%s owner_epoch=%llu %s",
+	    magik_launcher_state_name(s_state),
+	    s_pid,
+	    s_main_generation,
+	    fpga_io_owner_name(),
+	    (unsigned long long)fpga_io_owner_epoch(),
+	    detail ? detail : "");
+	event_jsonl(event, context);
+	mister_magik_status_write();
+}
+
 void mister_magik_record_sdram_config(bool valid, const char *source, unsigned int size_code)
 {
 	eventf(
@@ -1252,7 +1275,7 @@ static void video_reinit_diagnostic(void)
 	input_switch(1);
 	s_video_diagnostic_active = true;
 	video_fb_enable(0);
-	video_reinit();
+	video_reinit("magik-diagnostic");
 	video_menu_bg(user_io_status_get("[3:1]"));
 	s_video_diagnostic_active = false;
 	eventf("display_diag_reinit_done", "state=%s", magik_launcher_state_name(s_state));
@@ -2378,6 +2401,11 @@ void mister_magik_status_write(void)
 	json_escape(f, s_last_invariant_kind);
 	fprintf(f, ",\"last_invariant_detail\":");
 	json_escape(f, s_last_invariant_detail);
+	fprintf(f, ",\"video_event_count\":%lu", s_video_event_count);
+	fprintf(f, ",\"last_video_event\":");
+	json_escape(f, s_last_video_event);
+	fprintf(f, ",\"last_video_detail\":");
+	json_escape(f, s_last_video_detail);
 	fprintf(f, "}\n");
 	fclose(f);
 }

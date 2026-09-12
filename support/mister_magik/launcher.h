@@ -20,3 +20,4 @@ void mister_magik_command_reply(const char *result);
 void mister_magik_reply_channel_init(void);
 void mister_magik_record_invariant(const char *kind, const char *detail);
 void mister_magik_record_sdram_config(bool valid, const char *source, unsigned int size_code);
+void mister_magik_record_video_event(const char *event, const char *detail);

@@ -7,8 +7,8 @@ reapply only the features and tests listed here.
 ## Baseline
 
 - Upstream project: `MiSTer-devel/Main_MiSTer`
-- Baseline commit: `f8dc68e3dcf4694f5593e6552aea56cd852982af`
-- Baseline release: `Release 20260907.`
+- Baseline commit: `47221c18987e101f50caafeb3b615f53b62722ca`
+- Baseline release: `Release 20260912.`
 - Public fork/app: `/media/fat/MiSTer_MagiK` and `/media/fat/mister-magik/`
 - Development fork/app: `/media/fat/MiSTer_MagiKDev` and
   `/media/fat/mister-magik-dev/`
@@ -34,11 +34,17 @@ CD32/CDTV raw CUE/BIN data/audio support, quick-start ROM lookup through
 and Minimig CPU selector, default preset, and reserved-config-value repairs.
 Only `menu.cpp` overlaps the MagiK runtime patch surface, in separate sections.
 
+The 20260912 update merges all four intervening upstream commits while
+preserving the existing MagiK patch stack and published history. It adds NeXT
+Ethernet/RTC support and recognizes the mainline Linux names for Switch motion
+devices and player/home LEDs. The `user_io.cpp` overlap retains both NeXT
+Ethernet startup and MagiK's structured launch-plan gate.
+
 CD32 and A1200 presets now select the approximately 14 MHz 68020 mode. Device
 validation requires the matching Minimig `20260907` core or a verified later
 descendant containing the throttle correction and CPU flag wiring. Do not
 implicitly replace installed stock cores. All previously recorded device
-results below remain historical; they do not qualify the 20260907 update.
+results below remain historical; they do not qualify the 20260912 update.
 
 ## Intended Features
 
@@ -880,7 +886,7 @@ FPGA latch startup ownership:
 
 ## Rebuild From Scratch
 
-1. Reset to upstream release commit `dfb4791bea126afea66025be806651a995f9cfd6`.
+1. Reset to upstream release commit `47221c18987e101f50caafeb3b615f53b62722ca`.
 2. Reapply the features listed in this file, keeping to the approved patch
    surface.
 3. Run host tests from this repo.

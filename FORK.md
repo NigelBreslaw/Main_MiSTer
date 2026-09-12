@@ -8,18 +8,17 @@ being mixed into the product UI codebase.
 ## Upstream Baseline
 
 - Upstream: `MiSTer-devel/Main_MiSTer`
-- Baseline commit: `f8dc68e3dcf4694f5593e6552aea56cd852982af`
-- Baseline subject: `Release 20260907.`
+- Baseline commit: `47221c18987e101f50caafeb3b615f53b62722ca`
+- Baseline subject: `Release 20260912.`
 - Baseline policy: use upstream release-marker commits named `Release YYYYMMDD.`
 - Device binary name: `/media/fat/MiSTer_MagiK`
 
 This is not an official MiSTer-devel build. Published binaries must be labelled
 as MiSTer MagiK builds.
 
-This baseline includes all nine commits since `Release 20260823.`: CD32/CDTV
-raw CUE/BIN support, Amiga quick-start ROM lookup through `HomeDir()`, MacPlus
-CD-ROM support, and Minimig CPU selector, preset, and configuration repairs,
-plus the CD-fix merge and release marker. The release is merged into the
+This baseline includes the four commits since `Release 20260907.`: NeXT
+Ethernet/RTC support, mainline Switch motion-device naming, mainline Switch
+player/home LED naming, and the release marker. The release is merged into the
 existing MagiK patch stack without rewriting published history.
 
 CD32 and A1200 presets now select the approximately 14 MHz 68020 mode. Validate

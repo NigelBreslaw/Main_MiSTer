@@ -671,7 +671,9 @@ There is no command timeout that can abandon a delayed reply while Main remains
 alive. Legacy generic `load_core` commands do not write replies. Main also
 refreshes `main-status.json` every five seconds as an event-loop heartbeat so
 callers can distinguish a responsive Main from a stopped one without command
-deadlines.
+deadlines. Status publication uses a same-directory temporary file, sync, and
+atomic rename so a concurrent health poll can observe either complete status
+generation but never the truncate-before-rewrite window.
 
 Active-core return uses the dedicated acknowledged
 `mister_magik_return_to_launcher` command. Main replies `ok HandoffStarted`
@@ -1077,3 +1079,26 @@ compatibility to `MiSTer_MagiKDev`:
   to the Rust launcher or individual cores. Host policy checks pin the narrow
   integration, and the standard fork host suite, patch-surface check, component
   contract test, and Apple-container clean build provide commit assurance.
+
+2026-09-12 Release 20260912 and periodic-flicker attribution:
+
+- The canonical fork merges upstream `47221c18987e101f50caafeb3b615f53b62722ca`
+  and retains the stock-6.18 writer-silence, Dev qualification, and readiness
+  gates. Host state tests, the component test, patch-surface validation, and a
+  clean Apple-container ARM build passed.
+- Bounded Main events now identify HDMI status interrupts, TMDS power changes,
+  video reinitialization, and explicit output application. EDID events include
+  the previous and observed fingerprints/version plus whether the bytes were
+  identical; every record includes launcher PID/generation and FPGA
+  owner/epoch. `main-status.json` publishes the event count and latest record.
+- A development Main ran from boot time 6016078 ms through 6265602 ms with the
+  same Main PID, launcher PID, ownership epoch, zero crashes/invariants, and
+  zero video events. Therefore the unconditional launcher-return HDMI reassert
+  did not execute during that 249.5-second interval. This narrows the suspected
+  two-minute flicker but does not claim it was physically observed or absent.
+- The first Main-only transaction exposed a reproducible status race: health
+  polling read `main-status.json` between truncate and rewrite and reported
+  `EOF while parsing a value`. Files restored successfully while the candidate
+  Main itself reached `LauncherActive`. After atomic status publication was
+  added, the same typed Main-only workflow completed in one attempt without a
+  Linux reboot or kernel, module, FPGA, application, or configuration change.

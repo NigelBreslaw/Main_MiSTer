@@ -5,6 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${TMPDIR:-/tmp}/mister-magik-launcher-state-test"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/input_priority.cpp" \
+  "$ROOT/tests/input_priority_test.cpp" \
+  -o "$OUT-input-priority"
+"$OUT-input-priority"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/launcher_wait.cpp" \
   "$ROOT/tests/launcher_wait_test.cpp" \
   -o "$OUT-wait"

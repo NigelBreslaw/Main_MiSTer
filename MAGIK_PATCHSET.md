@@ -48,6 +48,15 @@ results below remain historical; they do not qualify the 20260912 update.
 
 ## Intended Features
 
+- While forwarding launcher input, Main temporarily uses ordinary scheduling at
+  nice -20, ahead of launcher rendering at nice -10 on CPU1. The scoped guard in
+  `input_poll_launcher` restores the original nice on every return, before Main
+  commands and game/core work. No real-time scheduling or affinity change is
+  introduced. Read/apply/restore failures are reported once. Host tests cover
+  restoration, an already elevated caller, and syscall failures. This prioritizes
+  forwarding but is not a hard latency guarantee; physical evdev-to-uinput
+  captures under rendering load must establish the observed sub-1 ms result.
+
 - Boot through stock `/media/fat/MiSTer` and MiSTer.ini `main=MiSTer_MagiK`.
 - Let Main initialize HDMI/video/menu-core prerequisites.
 - Keep the MagiK-specific Menu RBF's native video background solid black until

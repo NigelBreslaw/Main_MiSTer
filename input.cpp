@@ -19,6 +19,7 @@
 #include <math.h>
 
 #include "input.h"
+#include "support/mister_magik/input_priority.h"
 #include "autofire.h"
 #include "user_io.h"
 #include "menu.h"
@@ -6659,6 +6660,9 @@ int input_poll(int getchar)
 
 int input_poll_launcher(int command_fd)
 {
+	// Main must wake ahead of CPU1 rendering to forward physical edges promptly.
+	// This remains SCHED_OTHER and restores nice before handling Main commands.
+	MagikInputPriority priority;
 	return input_poll_mode(0, true, command_fd);
 }
 

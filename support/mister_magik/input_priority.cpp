@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/resource.h>
 
 static bool read_nice(int *nice)
@@ -18,10 +19,11 @@ static bool write_nice(int nice)
 
 static void report_failure(const char *operation)
 {
-	// Retain an observable failure without logging on every input-loop entry.
-	static bool reported = false;
-	if (!reported) fprintf(stderr, "MiSTer MagiK input priority: %s failed (errno=%d)\n", operation, errno);
-	reported = true;
+	// Report each operation independently so an earlier failure cannot hide restoration failure.
+	static bool reported[3] = {};
+	const unsigned index = !strcmp(operation, "restore") ? 2 : !strcmp(operation, "apply") ? 1 : 0;
+	if (!reported[index]) fprintf(stderr, "MiSTer MagiK input priority: %s failed (errno=%d)\n", operation, errno);
+	reported[index] = true;
 }
 
 MagikInputPriority::MagikInputPriority()

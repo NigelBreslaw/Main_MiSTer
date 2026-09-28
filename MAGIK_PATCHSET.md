@@ -191,7 +191,8 @@ Runtime changes should stay in or immediately around:
   handoff
 - `user_io.cpp` / `user_io.h` only for the post-`video_init()` Menu-core boot
   hook and the testable framework-word builder used by Main's existing
-  `user_io_send_buttons()` path
+  `user_io_send_buttons()` path, plus the no-reboot session Main guard on
+  the `main=` re-exec
 - `input.cpp` only for MagiK simple joystick policy gating, MagiK-owned
   baseline-map loading, and the launcher menu-input proxy including preserving
   Main's generic command poll result outside launcher mode
@@ -228,6 +229,19 @@ wrapper maps that conventional clean-build spelling to `make clean && make`
 because upstream Main's Makefile has no explicit `all` target.
 
 ## Implemented Features And Tests
+
+- No-reboot session Main: when `MISTER_MAGIK_SESSION_MAIN` holds this
+  process's absolute executable path, `user_io_init()` does not re-exec the
+  MiSTer.ini `main=` selection. Main's exec restarts inherit the environment,
+  so core launches and launcher returns keep the session Main while MiSTer.ini
+  and the next boot stay unchanged. Stock Main and any other executable path
+  ignore the variable. The guard overrides every effective `main=`, including
+  core-specific INI sections, for the whole session. The match is exact and
+  case-sensitive, unlike upstream's `main=` comparison, so a mismatch fails
+  toward the configured Main. Child processes inherit the variable; only the
+  fork reads it. Host tests cover matching, mismatched, relative, empty, and
+  absent values, and a source-order check keeps the guard before the `main=`
+  re-exec.
 
 - Exclusive FPGA ownership update: the launcher lifecycle transfers SPI/GPO
   ownership only after Main has established bootstrap black, completed the
@@ -910,6 +924,7 @@ FPGA latch startup ownership:
 Host tests:
 
 - Launcher state transition tests.
+- Session Main environment guard tests.
 - Handoff command parser tests, including strict structured-plan parser
   acceptance/rejection for schema, mount kind, required paths, and numeric
   fields.

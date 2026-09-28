@@ -45,6 +45,7 @@
 #include "support/mister_magik/launcher.h"
 #include "support/mister_magik/launcher_command.h"
 #include "support/mister_magik/sdram_config.h"
+#include "support/mister_magik/session_main.h"
 
 static char core_path[1024] = {};
 static char rbf_path[1024] = {};
@@ -1543,8 +1544,15 @@ void user_io_init(const char *path, const char *xml)
 	const char *main = getFullPath(cfg.main);
 	if (strcasecmp(main, getappname()) && FileExists(main))
 	{
-		printf("Current exec is %s, core requires exec %s\n", getappname(), main);
-		app_restart(path, xml, main);
+		if (magik_session_keeps_main(getappname()))
+		{
+			printf("MiSTer MagiK session keeps %s; ignoring main=%s\n", getappname(), main);
+		}
+		else
+		{
+			printf("Current exec is %s, core requires exec %s\n", getappname(), main);
+			app_restart(path, xml, main);
+		}
 	}
 
 	uint8_t hotswap[4] = {};

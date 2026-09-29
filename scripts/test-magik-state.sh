@@ -78,6 +78,12 @@ ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
 "$OUT-return"
 
 ${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
+  "$ROOT/support/mister_magik/session_main.cpp" \
+  "$ROOT/tests/session_main_test.cpp" \
+  -o "$OUT-session-main"
+"$OUT-session-main"
+
+${CXX:-c++} -std=c++14 -Wall -Wextra -I"$ROOT" \
   "$ROOT/support/mister_magik/layout.cpp" \
   "$ROOT/support/mister_magik/menu_path.cpp" \
   "$ROOT/tests/menu_path_test.cpp" \
@@ -372,6 +378,16 @@ awk '
   END { if (!checked) exit 1 }
 ' "$ROOT/support/mister_magik/launcher.cpp" || {
   echo "ERROR: post-video_init bootstrap must enter the common black transition" >&2
+  exit 1
+}
+
+awk '
+  /const char \*main = getFullPath\(cfg\.main\);/ { in_main=1 }
+  in_main && /magik_session_keeps_main\(getappname\(\)\)/ { guard=NR }
+  in_main && /app_restart\(path, xml, main\);/ { restart=NR; in_main=0 }
+  END { if (!guard || !restart || guard >= restart) exit 1 }
+' "$ROOT/user_io.cpp" || {
+  echo "ERROR: session Main guard must precede the main= re-exec" >&2
   exit 1
 }
 

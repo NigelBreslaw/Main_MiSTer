@@ -1,13 +1,9 @@
 # MiSTer MagiK Main patch set
 
-Upstream baseline: `47221c18987e101f50caafeb3b615f53b62722ca`
-(`Release 20260912.`). This branch is rebuilt from that release, rather than
-replaying the development history. The previous published state is preserved
-at `mister-magik-20261010` (`e88a82c32220656e15160a9a034c332501e34f7e`).
-Historical qualification and implementation notes remain in that archive.
-The separate colour/monochrome OSD and Spectrum experiments are excluded.
+This document describes the current Main fork changes relative to upstream
+`47221c18987e101f50caafeb3b615f53b62722ca` (`Release 20260912.`).
 
-## Retained patches
+## Patch inventory
 
 | Area | Why Main needs it | Owning code / validation |
 | --- | --- | --- |
@@ -25,68 +21,79 @@ The separate colour/monochrome OSD and Spectrum experiments are excluded.
 | Dormancy | Block while MagiK owns the UI and preserve both upstream scheduler variants | `main.cpp`, `scheduler.cpp`, `launcher_wait.*`; wait tests and integration checks |
 | Input forwarding and priority | Forward launcher input with contributor counts, queued releases and scoped nice restoration | `input.cpp`, `input_proxy.*`, `input_priority.*`; proxy / priority tests |
 | Controller policy | Honor simple input and button overrides without changing stock Menu mapping | `input.cpp`, `joymapping.cpp`, `button_overrides.*`; mapping tests |
-| Display transactions | Preserve apply, confirm, cancel, rollback, persistence and HDMI/CRT mode selection | `launcher.cpp`, `video.*`, `launcher_command.*`; display / return tests |
+| Display transactions | Apply, confirm, cancel, roll back and persist HDMI/CRT mode selection; initialize HDMI before launcher entry | `launcher.cpp`, `video.*`, `launcher_command.*`; display / return tests |
 | Main reload and Linux reboot | Keep the Dev replacement handoff and explicit reset / fault-qualification paths | `launcher.cpp`; lifecycle and reload contract checks |
 | Status and incident evidence | Publish atomic state, crash, input and video diagnostics | `launcher.cpp`, `launcher_diag.*`; diagnostics tests |
 
-## Restart and buffer contract
+## Launcher and framebuffer ownership
 
-Main remains dormant while MagiK owns the launcher. Existing lifecycle guards
-suppress stock OSD, input and framebuffer work during startup and ownership.
-Main enters native black before preflight, then transfers FPGA ownership.
-For an HDMI route, Main reasserts its initialized transmitter and mode before
-entering the launcher, including a fresh Main start rather than only game return.
-MagiK declares ready only after two completed advancing latch posts on
-alternating scanout slots. This proves the internal boundary; USB video is
-needed to establish physical visibility.
+Main initializes video and Menu-core prerequisites, then enters native black
+before platform preflight. It disables stock OSD, OSD keys, launcher input and
+legacy framebuffer routing. For HDMI output, Main reasserts the initialized
+transmitter and mode before launcher entry. Direct Video retains its separate
+framebuffer-mux selection.
 
-Restarting the launcher retains graphics mode; genuine stock UI handoff and
-failed-spawn recovery restore text mode. Actual VT activation and graphics
-verification remain required. Redundant ANSI clearing after graphics-mode
-selection and the writer-silence bookkeeping class are removed. Its claimed
-drain did not synchronously drain the asynchronous module-parameter writer.
-Existing lifecycle guards continue to suppress stock framebuffer/OSD work.
+Main activates tty2 and verifies graphics mode before spawning the launcher.
+Launcher restart retains graphics mode. A stock UI handoff or failed-spawn
+recovery restores text mode. Console setup does not write ANSI clearing text
+after graphics-mode selection.
 
-A fresh Main start must reassert its HDMI transmitter/mode before launcher
-entry. Source-valid scanout slots and ready reports alone did not guarantee
-visible HDMI during qualification. The existing game-return reassertion routine
-is now also used for fresh Main starts. The Direct Video path remains excluded.
-The proposed VT cleanup was initially blamed for black output; testing with
-that cleanup reverted disproved the attribution. HDMI initialization restored
-visible output and the combined cleanup is qualified separately below.
+Main transfers exclusive FPGA SPI/GPO ownership after preflight succeeds and
+restores Main ownership after the supervised child is reaped. Lifecycle guards
+suppress stock OSD, input and framebuffer work while MagiK owns the session.
+Both upstream scheduler variants use dormant launcher waiting.
 
-The application's anonymous RGB565 composition surface is separate from
-Main's legacy framebuffer. Its initial, periodic and recovery paths must not
-select Main's buffer as a legacy RGB565 source. The app correction lives in
-the MiSTer MagiK repository, rather than adding another Main workaround.
+The scanout-slot application renders into a separate RGB565 composition
+surface and publishes completed slots. An anonymous composition surface must
+not select Main's legacy framebuffer as its source.
 
-## Deletion and simplification audit
+## Command and readiness contracts
 
-Removed six helpers without production callers, an unused tty name, unused
-ready-report output fields and a duplicate encoded launch-plan buffer. The
-ready parser retains every wire, geometry, sequence, receipt and nonblank
-validation, including v2 compatibility. The encoded payload still has the
-same strict 4096-byte bound.
+The FIFO supports launcher lifecycle, real-path and structured core launches,
+external `load_core`, Menu return, display transactions, Dev Main reload and
+explicit reboot/reset diagnostics. Real and external launches share validation
+and acknowledgement ordering while retaining their distinct handoff flag.
+Stock core/MGL/MRA loaders remain responsible for core loading.
 
-Real / external launch dispatch now shares validation and acknowledgement
-ordering. Both input consumers use one uncached policy reader with their
-existing Menu exclusions. The display rollback uses its existing boolean
-rather than an identity helper. Command parser helpers and status publication
-remain private to their translation units.
+Ready reports use the canonical v2/v3 wire formats and bind the child PID,
+startup token, Main PID/generation and FPGA owner epoch. The parser validates
+capabilities, geometry, advancing sequence and route epochs, alternating slots,
+receipts and nonblank source evidence. Its output contains only the identity
+fields used by Main to accept the report.
 
-Broader handoff/scheduler/ownership rewrites are deferred. Legacy settings
-commands, HDMI return reassertion and direct-reset qualification remain until
-there is evidence to retire them. Preflight's blocking child wait and global
-uinput journal scope remain separate follow-ups; this rebuild does not claim
-all startup subprocesses are time bounded.
+Structured launch plans retain the strict 4096-byte encoded-payload bound.
+The serialized argument is stored once; decoded fields retain their existing
+validation and bounds. Parser helpers and status publication are private to
+their translation units.
+
+Display transactions preserve confirmation, cancellation, rollback and
+persistence semantics. Legacy settings commands and direct-reset qualification
+are supported. Session Main selection uses an exact executable-path match.
+
+## Input and diagnostics
+
+Input forwarding retains contributor counts, queued releases and bounded
+journal delivery. Launcher polling temporarily uses nice -20 and restores the
+caller's priority on every return. Controller policy uses one uncached marker
+reader; callers retain their stock Menu exclusions and button-override rules.
+
+State and incident reports are published atomically. They expose lifecycle,
+readiness, FPGA ownership, crashes, input delivery and video diagnostics.
+Readiness establishes an internal scanout boundary; physical display visibility
+requires output capture.
+
+Preflight subprocess waiting uses blocking `waitpid`, so the readiness timeout
+does not bound the entire startup. The uinput journal also applies to stock
+send-key delivery.
 
 ## Validation
 
-Run `bash scripts/test-magik-state.sh`, `python3 tests/test_main_component.py`,
-`bash scripts/check-magik-patch-surface.sh` and `./build-container.sh clean all`.
-The host suite tests portable contracts and selected production functions;
-the ARM build checks linkage. Physical restart, game return and display
-validation must identify the installed app/Main revisions and direct HDMI
-capture. A passing build is not device qualification.
+- `bash scripts/test-magik-state.sh`
+- `python3 tests/test_main_component.py`
+- `bash scripts/check-magik-patch-surface.sh`
+- `./build-container.sh clean all`
 
-No FPGA, kernel, stock core or MiSTer.ini changes are part of this rebuild.
+The host suite checks portable contracts and selected production functions.
+The ARM build checks compilation and linkage. Validate visible launcher
+restart, game return and display transactions using identified app/Main
+revisions and direct HDMI capture.

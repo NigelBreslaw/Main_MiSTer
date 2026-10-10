@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <inttypes.h>
 #include <linux/fb.h>
 #include <errno.h>
@@ -30,6 +31,7 @@
 
 #include "support.h"
 #include "support/arcade/mra_loader.h"
+#include "support/mister_magik/launcher.h"
 #include "lib/imlib2/Imlib2.h"
 #include "lib/md5/md5.h"
 
@@ -2417,7 +2419,10 @@ static void fb_init()
 			printf("Unable to mmap FB!\n");
 		}
 	}
-	spi_uio_cmd16(UIO_SET_FBUF, 0);
+	if (!mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		spi_uio_cmd16(UIO_SET_FBUF, 0);
+	}
 }
 
 // Structure to hold DAC configuration
@@ -2704,20 +2709,58 @@ void video_init()
 	video_set_mode(&v_def, 0);
 }
 
-void video_reinit()
+static uint32_t video_edid_fingerprint()
+{
+	uint32_t hash = 2166136261U;
+	for (size_t i = 0; i < sizeof(edid); i++)
+	{
+		hash ^= edid[i];
+		hash *= 16777619U;
+	}
+	return hash;
+}
+
+static void video_diag_eventf(const char *event, const char *fmt, ...)
+{
+	char detail[384] = {};
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(detail, sizeof(detail), fmt, args);
+	va_end(args);
+	mister_magik_record_video_event(event, detail);
+}
+
+void video_reinit(const char *reason)
 {
 	int prev_ver = edid_version;
-	read_edid(true);
+	uint8_t previous_edid[sizeof(edid)];
+	memcpy(previous_edid, edid, sizeof(edid));
+	uint32_t previous_hash = video_edid_fingerprint();
+	int read_result = read_edid(true);
+	uint32_t observed_hash = video_edid_fingerprint();
+	bool identical = !memcmp(previous_edid, edid, sizeof(edid));
+	video_diag_eventf(
+	    "video_reinit_attempt",
+	    "reason=%s read_result=%d previous_version=%d observed_version=%d previous_edid=%08x observed_edid=%08x identical=%d",
+	    reason ? reason : "unspecified",
+	    read_result,
+	    prev_ver,
+	    edid_version,
+	    previous_hash,
+	    observed_hash,
+	    identical ? 1 : 0);
 
 	// re-read gave nothing new but a valid EDID is still held: the mode is unchanged,
 	// so don't bounce a working link (some clones can't re-lock mid-operation)
 	if (edid_version == prev_ver && is_edid_valid())
 	{
 		printf("*** Video re-init skipped: EDID unchanged.\n");
+		video_diag_eventf("video_reinit_skipped", "reason=%s guard=unchanged-edid", reason ? reason : "unspecified");
 		return;
 	}
 
 	printf("*** Video re-initialization.\n");
+	video_diag_eventf("video_reinit_apply", "reason=%s identical_edid=%d", reason ? reason : "unspecified", identical ? 1 : 0);
 
 	hdmi_config_init();
 	// re-init resets 0x17/0x3B/0x3C - re-apply, or video stays black if any of them changed
@@ -2734,7 +2777,92 @@ void video_reinit()
 	video_menu_bg(-1);
 }
 
-void tmds_power(int on)
+static bool video_apply_active_output(bool keep_direct_video_auto, bool restore_menu_background, const char *reason)
+{
+	uint8_t previous_edid[sizeof(edid)];
+	memcpy(previous_edid, edid, sizeof(edid));
+	uint32_t previous_hash = video_edid_fingerprint();
+	int previous_version = edid_version;
+	int read_result = read_edid(true);
+	video_diag_eventf(
+	    "video_output_apply",
+	    "reason=%s read_result=%d previous_version=%d observed_version=%d previous_edid=%08x observed_edid=%08x identical=%d keep_auto=%d restore_menu=%d",
+	    reason ? reason : "unspecified",
+	    read_result,
+	    previous_version,
+	    edid_version,
+	    previous_hash,
+	    video_edid_fingerprint(),
+	    !memcmp(previous_edid, edid, sizeof(edid)) ? 1 : 0,
+	    keep_direct_video_auto ? 1 : 0,
+	    restore_menu_background ? 1 : 0);
+	hdmi_config_init();
+	hdmi_invalidate_mode_cache();
+	hdmi_config_set_hdr();
+	video_mode_load(keep_direct_video_auto);
+	video_set_mode(&v_def, 0);
+	user_io_send_buttons(1);
+	video_mode_adjust(true);
+	if (restore_menu_background) video_menu_bg(-1);
+	return true;
+}
+
+bool video_apply_runtime_output(const char *mode)
+{
+	if (!mode || !mode[0]) return false;
+	const bool auto_requested = !strcmp(mode, "auto");
+	if (auto_requested)
+	{
+		cfg.direct_video = 2;
+	}
+	else if (!strcmp(mode, "crt-240p60") || !strcmp(mode, "crt-288p50") ||
+	         !strcmp(mode, "crt-480p60") || !strcmp(mode, "crt-576p50"))
+	{
+		cfg.direct_video = 1;
+		cfg.menu_pal = strstr(mode, "288") || strstr(mode, "576");
+		cfg.forced_scandoubler = strstr(mode, "480") || strstr(mode, "576");
+	}
+	else
+	{
+		const char *value = 0;
+		if (!strcmp(mode, "hdmi") || !strcmp(mode, "custom")) value = cfg.video_conf;
+		else if (!strcmp(mode, "hdmi-1280x720p60")) value = "0";
+		else if (!strcmp(mode, "hdmi-1366x768p60")) value = "10";
+		else if (!strcmp(mode, "hdmi-1920x1080p60")) value = "8";
+		else if (!strcmp(mode, "hdmi-1920x1200p60")) value = "1920,1200,60";
+		else if (!strcmp(mode, "hdmi-2048x1536p60")) value = "13";
+		else if (!strcmp(mode, "hdmi-2560x1440p60")) value = "14";
+		else return false;
+		cfg.direct_video = 0;
+		if (value != cfg.video_conf)
+			snprintf(cfg.video_conf, sizeof(cfg.video_conf), "%s", value);
+	}
+
+	// Unlike video_reinit(), a settings transaction must not skip an unchanged
+	// EDID: the requested mode itself changed. Refresh the sink before resetting
+	// the transmitter, matching the reinitialization path that recovers a link
+	// after boot. Without this, the FPGA geometry changes while HDMI can remain
+	// unsignalled after leaving direct video.
+	// Preserve automatic sink detection only while applying auto itself. An
+	// explicit mode, including transaction rollback, must clear the static
+	// auto-routing latch before loading its saved geometry.
+	return video_apply_active_output(auto_requested, true, "runtime-settings");
+}
+
+bool video_reassert_runtime_output()
+{
+	// Direct-video routes do not use the HDMI transmitter mode that this
+	// recovery reasserts. The caller also guards the route so a future caller
+	// cannot accidentally bounce a working CRT output.
+	if (cfg.direct_video) return false;
+
+	// Keep the automatic-output latch established by video_init(). This repeats
+	// the same transmitter and mode sequence used by an attended same-mode
+	// display apply without exposing Menu's background before MagiK is ready.
+	return video_apply_active_output(true, false, "launcher-return");
+}
+
+static void tmds_power(int on, const char *reason)
 {
 	// ADV7513 power-down control. 0 = power on, 1 = power down.
 	if (hdmi_main_fd >= 0)
@@ -2742,7 +2870,15 @@ void tmds_power(int on)
 		uint8_t val = on ? 0x10 : 0x50;
 		int res = i2c_smbus_write_byte_data(hdmi_main_fd, 0x41, val);
 		if (res < 0) printf("i2c: write error (41 %02X): %d\n", val, res);
+		video_diag_eventf(
+		    "tmds_power",
+		    "reason=%s requested=%s register_value=%02x result=%d",
+		    reason ? reason : "unspecified",
+		    on ? "on" : "off",
+		    val,
+		    res);
 	}
+	else video_diag_eventf("tmds_power", "reason=%s requested=%s result=no-device", reason ? reason : "unspecified", on ? "on" : "off");
 }
 
 void video_hdmi_power(int on)
@@ -2751,7 +2887,7 @@ void video_hdmi_power(int on)
 	if (hdmi_main_fd >= 0)
 	{
 		hdmi_power = on ? 1 : 0;
-		tmds_power(on);
+		tmds_power(on, "video-hdmi-power");
 
 		if (on)
 		{
@@ -2760,7 +2896,7 @@ void video_hdmi_power(int on)
 				uint8_t current_status = i2c_smbus_read_byte_data(hdmi_main_fd, 0x42);
 				bool hpd_high = (current_status & 0x40) != 0; // Bit 6: HPD pin level
 				bool MS_high = (current_status & 0x20) != 0; // Bit 5: Monitor Sense level
-				if (hpd_high && MS_high) video_reinit();
+				if (hpd_high && MS_high) video_reinit("hdmi-power-wake");
 			}
 			else
 			{
@@ -2791,6 +2927,15 @@ void video_poll()
 
 			bool hpd_high = (current_status & 0x40) != 0; // Bit 6: HPD pin level
 			bool MS_high = (current_status & 0x20) != 0; // Bit 5: Monitor Sense level
+			video_diag_eventf(
+			    "hdmi_status_interrupt",
+			    "irq_status=%02x current_status=%02x hpd=%d monitor_sense=%d hdmi_power=%d hdmi_need_init=%d",
+			    irq_status,
+			    current_status,
+			    hpd_high ? 1 : 0,
+			    MS_high ? 1 : 0,
+			    hdmi_power,
+			    hdmi_need_init);
 
 			// The safe window to read EDID is when BOTH 5V power (HPD)
 			// and internal display termination (Monitor Sense) are fully high and stable
@@ -2810,7 +2955,7 @@ void video_poll()
 			else
 			{
 				printf("[HDMI] Link lost or re-routing (HPD=%d, MS=%d)\n", hpd_high, MS_high);
-				tmds_power(0);
+				tmds_power(0, "hdmi-link-lost");
 			}
 		}
 	}
@@ -3460,6 +3605,14 @@ static void fb_write_module_params()
 {
 	int width = fb_width;
 	int height = fb_height;
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_main_framebuffer_route_while_launcher_active", "fb_write_module_params");
+		}
+		return;
+	}
+
 	offload_add_work([=]
 	{
 		FILE *fp = fopen("/sys/module/MiSTer_fb/parameters/mode", "wt");
@@ -3471,9 +3624,35 @@ static void fb_write_module_params()
 	});
 }
 
+int video_magik_enter_bootstrap_black()
+{
+	DisableIO();
+	int res = spi_uio_cmd_cont(UIO_SET_FBUF);
+	spi_w(0);
+	DisableIO();
+
+	fb_enabled = 0;
+	fb_num = 0;
+	if (!res)
+	{
+		printf("mister_magik: bootstrap framebuffer disable was not acknowledged\n");
+		return 0;
+	}
+	printf("mister_magik: bootstrap framebuffer route disabled\n");
+	return 1;
+}
+
 void video_fb_enable(int enable, int n)
 {
 	PROFILE_FUNCTION();
+
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_main_framebuffer_route_while_launcher_active", enable ? "video_fb_enable enable" : "video_fb_enable disable");
+		}
+		return;
+	}
 
 	if (fb_base)
 	{
@@ -3888,6 +4067,14 @@ void video_menu_bg(int n, int idle)
 
 	static int cached_idle = 0;
 	bg_has_picture = 0;
+
+	if (mister_magik_launcher_main_framebuffer_suppressed())
+	{
+		if (mister_magik_launcher_active()) {
+			mister_magik_record_invariant("unexpected_menu_background_while_launcher_active", n < 0 ? "video_menu_bg refresh" : "video_menu_bg set");
+		}
+		return;
+	}
 
 	if (n < 0)
 	{
@@ -4490,4 +4677,3 @@ int video_get_rotated()
 {
   return current_video_info.rotated;
 }
-

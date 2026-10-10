@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 #include "file_io.h"
+#include "support/mister_magik/user_io_config_map.h"
 
 #define UIO_STATUS      0x00
 #define UIO_BUT_SW      0x01
@@ -138,21 +139,6 @@
 #define KBD_LED_FLAG_MASK     0xC0
 #define KBD_LED_FLAG_STATUS   0x40
 
-#define BUTTON1                 0b0000000000000001
-#define BUTTON2                 0b0000000000000010
-#define CONF_VGA_SCALER         0b0000000000000100
-#define CONF_CSYNC              0b0000000000001000
-#define CONF_FORCED_SCANDOUBLER 0b0000000000010000
-#define CONF_YPBPR              0b0000000000100000
-#define CONF_AUDIO_96K          0b0000000001000000
-#define CONF_DVI                0b0000000010000000
-#define CONF_HDMI_LIMITED1      0b0000000100000000
-#define CONF_VGA_SOG            0b0000001000000000
-#define CONF_DIRECT_VIDEO       0b0000010000000000
-#define CONF_HDMI_LIMITED2      0b0000100000000000
-#define CONF_VGA_FB             0b0001000000000000
-#define CONF_DIRECT_VIDEO2      0b0010000000000000
-
 // core type value should be unlikely to be returned by broken cores
 #define CORE_TYPE_UNKNOWN   0x55
 #define CORE_TYPE_8BIT      0xa4   // generic core
@@ -243,6 +229,7 @@ const char* get_rbf_name();
 const char* get_rbf_path();
 
 uint16_t sdram_sz(int sz = -1);
+uint16_t user_io_ensure_sdram_config();
 int user_io_is_dualsdr();
 uint16_t altcfg(int alt = -1);
 

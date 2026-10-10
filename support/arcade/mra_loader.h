@@ -69,6 +69,9 @@ int arcade_get_direction();
 void arcade_nvm_save();
 
 mgl_struct* mgl_parse(const char *xml);
+mgl_struct* mgl_seed_launch_plan(const char *payload_path, const char *mount_kind, int mount_index, int delay_secs);
 mgl_struct* mgl_get();
+
+const char *mra_resolve_rbf_name(const char *rbfname, int arcade);
 
 #endif

@@ -9,6 +9,14 @@
 
 int fpga_io_init();
 
+bool fpga_io_transfer_to_magik(const char *site);
+bool fpga_io_restore_to_main(const char *site);
+const char *fpga_io_owner_name();
+uint64_t fpga_io_owner_epoch();
+uint64_t fpga_io_blocked_spi_writes();
+uint64_t fpga_io_blocked_gpo_writes();
+const char *fpga_io_last_blocked_site();
+
 void fpga_spi_en(uint32_t mask, uint32_t en);
 uint16_t fpga_spi(uint16_t word);
 uint16_t fpga_spi_fast(uint16_t word);
@@ -38,6 +46,7 @@ int fpga_load_rbf(const char *name, const char *cfg = 0, const char *xml = 0);
 
 void reboot(int cold);
 void app_restart(const char *path, const char *xml = 0, const char *exe = 0);
+bool app_restart_checked(const char *path, const char *xml = 0, const char *exe = 0);
 char *getappname();
 
 void fpga_wait_to_reset();

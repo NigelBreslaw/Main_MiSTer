@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <math.h>
+#include <time.h>
 
 #include "hardware.h"
 #include "user_io.h"
@@ -3624,8 +3625,54 @@ static void fb_write_module_params()
 	});
 }
 
+// The MagiK Menu RBF builds ascal with three 8 MiB native buffers at 0x20000000.
+#define MAGIK_NATIVE_SCALER_BASE   0x20000000
+#define MAGIK_NATIVE_SCALER_STRIDE 0x00800000
+#define MAGIK_NATIVE_SCALER_COUNT  3
+// A MagiK LFB route is at most one 2,101,248-byte scanout slot (2736-byte
+// stride by 768 lines); this span also covers ascal's native header and margin.
+#define MAGIK_NATIVE_SCALER_CLEAR  0x00340000
+
+// ascal moves its read address to the native buffers as soon as the LFB route
+// is disabled, but keeps the LFB width, stride and format until the next native
+// frame boundary. MagiK's LFB geometry spans far more of each buffer than the
+// Menu core's small black frame writes, so that transitional scan shows stale
+// DDR. Clear the reachable span first so the transition can only scan out black.
+static long s_native_scaler_clear_us = -1;
+
+static void magik_clear_native_scaler_buffers()
+{
+	struct timespec start = {}, end = {};
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	s_native_scaler_clear_us = -1;
+	void *buffers[MAGIK_NATIVE_SCALER_COUNT] = {};
+	for (int i = 0; i < MAGIK_NATIVE_SCALER_COUNT; i++)
+	{
+		buffers[i] = shmem_map(MAGIK_NATIVE_SCALER_BASE + i * MAGIK_NATIVE_SCALER_STRIDE, MAGIK_NATIVE_SCALER_CLEAR);
+		if (!buffers[i])
+		{
+			for (int j = 0; j < i; j++) shmem_unmap(buffers[j], MAGIK_NATIVE_SCALER_CLEAR);
+			mister_magik_record_video_event("native_scaler_clear_failed", "stage=map");
+			return;
+		}
+	}
+	for (int i = 0; i < MAGIK_NATIVE_SCALER_COUNT; i++)
+	{
+		memset(buffers[i], 0, MAGIK_NATIVE_SCALER_CLEAR);
+		shmem_unmap(buffers[i], MAGIK_NATIVE_SCALER_CLEAR);
+	}
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	s_native_scaler_clear_us = (end.tv_sec - start.tv_sec) * 1000000L + (end.tv_nsec - start.tv_nsec) / 1000;
+}
+
+long video_magik_native_scaler_clear_us()
+{
+	return s_native_scaler_clear_us;
+}
+
 int video_magik_enter_bootstrap_black()
 {
+	magik_clear_native_scaler_buffers();
 	DisableIO();
 	int res = spi_uio_cmd_cont(UIO_SET_FBUF);
 	spi_w(0);

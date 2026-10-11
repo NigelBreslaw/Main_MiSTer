@@ -996,10 +996,11 @@ static bool enter_bootstrap_black(const char *source)
 	set_bootstrap_phase("black-entered", source);
 	eventf(
 	    "bootstrap_black_entered",
-	    "source=%s count=%lu owner=%s child=none",
+	    "source=%s count=%lu owner=%s child=none native_clear_us=%ld",
 	    source ? source : "unknown",
 	    s_bootstrap_black_count,
-	    fpga_io_owner_name());
+	    fpga_io_owner_name(),
+	    video_magik_native_scaler_clear_us());
 	return true;
 }
 

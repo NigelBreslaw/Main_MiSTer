@@ -11,7 +11,7 @@ This document describes the current Main fork changes relative to upstream
 | Public / Dev layout | Select the correct app, module, RBF, logs and launcher from Main's executable name | `layout.*`; layout tests |
 | Session Main | Preserve an explicitly selected no-reboot session executable across core restarts | `session_main.*`, `user_io.cpp`; exact-match tests |
 | Supervised lifecycle | Start, suspend, resume, restart and reap the launcher through Main | `launcher.*`, `launcher_state.*`, `launcher_wait.*`; state and production-function tests |
-| Bootstrap black and VT | Enter native black before preflight and spawn; acquire and verify graphics on tty2 | `bootstrap_sequence.*`, `launcher.cpp`, `video.cpp`, `osd.cpp`; ordering and VT-failure tests |
+| Bootstrap black and VT | Enter native black before preflight and spawn, clearing the native ascal buffers first so the LFB-to-native switch cannot scan stale DDR; acquire and verify graphics on tty2 | `bootstrap_sequence.*`, `launcher.cpp`, `video.cpp`, `osd.cpp`; ordering and VT-failure tests |
 | FPGA ownership | Fence SPI/GPO writes and transfer ownership only after preflight and child reaping | `fpga_ownership.*`, `fpga_io.*`; ownership tests |
 | Platform preflight | Verify the matching module/RBF and latch capabilities before transferring ownership | `launcher.cpp`; bootstrap / preflight contract checks |
 | Ready reports | Accept only canonical v2/v3 reports bound to child, Main generation and owner epoch | `launcher_ready.*`; malformed, sequence, receipt and identity tests |

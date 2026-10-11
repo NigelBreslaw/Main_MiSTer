@@ -3626,31 +3626,48 @@ static void fb_write_module_params()
 }
 
 // The MagiK Menu RBF builds ascal with three 8 MiB native buffers at 0x20000000.
-#define MAGIK_NATIVE_SCALER_BASE  0x20000000
-#define MAGIK_NATIVE_SCALER_BYTES (3 * 0x00800000)
+#define MAGIK_NATIVE_SCALER_BASE   0x20000000
+#define MAGIK_NATIVE_SCALER_STRIDE 0x00800000
+#define MAGIK_NATIVE_SCALER_COUNT  3
+// A MagiK LFB route is at most one 2,101,248-byte scanout slot (2736-byte
+// stride by 768 lines); this span also covers ascal's native header and margin.
+#define MAGIK_NATIVE_SCALER_CLEAR  0x00340000
 
 // ascal moves its read address to the native buffers as soon as the LFB route
 // is disabled, but keeps the LFB width, stride and format until the next native
 // frame boundary. MagiK's LFB geometry spans far more of each buffer than the
 // Menu core's small black frame writes, so that transitional scan shows stale
-// DDR. Clear the buffers first so the transition can only scan out black.
+// DDR. Clear the reachable span first so the transition can only scan out black.
+static long s_native_scaler_clear_us = -1;
+
 static void magik_clear_native_scaler_buffers()
 {
 	struct timespec start = {}, end = {};
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	void *buffers = shmem_map(MAGIK_NATIVE_SCALER_BASE, MAGIK_NATIVE_SCALER_BYTES);
-	if (!buffers)
+	s_native_scaler_clear_us = -1;
+	void *buffers[MAGIK_NATIVE_SCALER_COUNT] = {};
+	for (int i = 0; i < MAGIK_NATIVE_SCALER_COUNT; i++)
 	{
-		mister_magik_record_video_event("native_scaler_clear_failed", "stage=map");
-		return;
+		buffers[i] = shmem_map(MAGIK_NATIVE_SCALER_BASE + i * MAGIK_NATIVE_SCALER_STRIDE, MAGIK_NATIVE_SCALER_CLEAR);
+		if (!buffers[i])
+		{
+			for (int j = 0; j < i; j++) shmem_unmap(buffers[j], MAGIK_NATIVE_SCALER_CLEAR);
+			mister_magik_record_video_event("native_scaler_clear_failed", "stage=map");
+			return;
+		}
 	}
-	memset(buffers, 0, MAGIK_NATIVE_SCALER_BYTES);
-	shmem_unmap(buffers, MAGIK_NATIVE_SCALER_BYTES);
+	for (int i = 0; i < MAGIK_NATIVE_SCALER_COUNT; i++)
+	{
+		memset(buffers[i], 0, MAGIK_NATIVE_SCALER_CLEAR);
+		shmem_unmap(buffers[i], MAGIK_NATIVE_SCALER_CLEAR);
+	}
 	clock_gettime(CLOCK_MONOTONIC, &end);
-	char detail[64];
-	snprintf(detail, sizeof(detail), "bytes=%d us=%ld", MAGIK_NATIVE_SCALER_BYTES,
-		(long)((end.tv_sec - start.tv_sec) * 1000000L + (end.tv_nsec - start.tv_nsec) / 1000));
-	mister_magik_record_video_event("native_scaler_cleared", detail);
+	s_native_scaler_clear_us = (end.tv_sec - start.tv_sec) * 1000000L + (end.tv_nsec - start.tv_nsec) / 1000;
+}
+
+long video_magik_native_scaler_clear_us()
+{
+	return s_native_scaler_clear_us;
 }
 
 int video_magik_enter_bootstrap_black()

@@ -11,7 +11,7 @@ This document describes the current Main fork changes relative to upstream
 | Public / Dev layout | Select the correct app, module, RBF, logs and launcher from Main's executable name | `layout.*`; layout tests |
 | Session Main | Preserve an explicitly selected no-reboot session executable across core restarts | `session_main.*`, `user_io.cpp`; exact-match tests |
 | Supervised lifecycle | Start, suspend, resume, restart and reap the launcher through Main | `launcher.*`, `launcher_state.*`, `launcher_wait.*`; state and production-function tests |
-| Bootstrap black and VT | Enter native black before preflight and spawn, clearing the native ascal buffers first so the LFB-to-native switch cannot scan stale DDR; acquire and verify graphics on tty2 | `bootstrap_sequence.*`, `launcher.cpp`, `video.cpp`, `osd.cpp`; ordering and VT-failure tests |
+| Bootstrap black and VT | Clear stale native scaler memory, then enter native black before preflight and spawn; acquire and verify graphics on tty2 | `bootstrap_sequence.*`, `launcher.cpp`, `video.cpp`, `osd.cpp`; ordering and VT-failure tests |
 | FPGA ownership | Fence SPI/GPO writes and transfer ownership only after preflight and child reaping | `fpga_ownership.*`, `fpga_io.*`; ownership tests |
 | Platform preflight | Verify the matching module/RBF and latch capabilities before transferring ownership | `launcher.cpp`; bootstrap / preflight contract checks |
 | Ready reports | Accept only canonical v2/v3 reports bound to child, Main generation and owner epoch | `launcher_ready.*`; malformed, sequence, receipt and identity tests |
@@ -46,6 +46,20 @@ Both upstream scheduler variants use dormant launcher waiting.
 The scanout-slot application renders into a separate RGB565 composition
 surface and publishes completed slots. An anonymous composition surface must
 not select Main's legacy framebuffer as its source.
+
+### Clean switch back to native black
+
+When MagiK quits or restarts, Main turns off MagiK's framebuffer route and the
+scaler falls back to the Menu core's native buffers. The scaler switches its
+read address immediately but keeps MagiK's width, stride and format until the
+next native frame. For up to one frame it therefore reads far past the Menu
+core's small black image and showed stale memory as noise on screen.
+
+Before every bootstrap black, Main now zeroes the first 3.25 MiB of each of the
+three native scaler buffers (0x20000000, 8 MiB apart). That covers the largest
+MagiK route (one 2,101,248-byte scanout slot), so the switch can only show
+black. The `bootstrap_black_entered` event reports the time taken as
+`native_clear_us`; a mapping failure records `native_scaler_clear_failed`.
 
 ## Command and readiness contracts
 

@@ -69,6 +69,8 @@ int   hasAPI1_5();
 
 void video_fb_enable(int enable, int n = 0);
 int video_magik_enter_bootstrap_black();
+// Duration of the last native scaler clear, or -1 when it did not complete.
+long video_magik_native_scaler_clear_us();
 int video_fb_state();
 void video_menu_bg(int n, int idle = 0);
 int video_bg_has_picture();
